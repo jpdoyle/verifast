@@ -185,7 +185,8 @@ OCAMLDEP     = $(firstword $(wildcard ${OCAMLBIN}/ocamldep.opt ${OCAMLBIN}/ocaml
 ifeq ($(OS), Windows_NT)
   CAMLP4O    = camlp4o.opt
 else
-  CAMLP4O      = $(firstword $(wildcard ${OCAMLBIN}/camlp4o.opt ${OCAMLBIN}/camlp4o))
+  #CAMLP4O      = $(firstword $(wildcard ${OCAMLBIN}/camlp4o.opt ${OCAMLBIN}/camlp4o))
+  CAMLP4O      = $(shell ocamlfind query camlp4)
 endif
 
 # Do we build with "-I ./linux" or "-I ./win":
