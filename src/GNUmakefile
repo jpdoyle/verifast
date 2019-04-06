@@ -478,19 +478,19 @@ verifast: ../bin/verifast$(DOTEXE) $(STDLIB)
 
 z3prover.cmx: $(INCLUDE_OS_DIR)/Perf.cmxa proverapi.cmx z3prover.ml
 	@echo "  OCAMLOPT " $@
-	${OCAMLOPT} $(OCAMLCFLAGS) -warn-error F -c -I $(Z3_OCAML) z3.cmxa -I ./$(INCLUDE_OS_DIR) Perf.cmxa proverapi.cmx z3prover.ml
+	${OCAMLOPT} $(OCAMLCFLAGS) -warn-error F -c -I $(Z3_OCAML) z3.cmxa -I ./$(INCLUDE_OS_DIR) $(NUMS)/nums.cmxa Perf.cmxa proverapi.cmx z3prover.ml
 
 z3v2prover.cmx: $(INCLUDE_OS_DIR)/Perf.cmxa proverapi.cmx z3v2prover.ml
 	@echo "  OCAMLOPT " $@
-	${OCAMLOPT} $(OCAMLCFLAGS) -warn-error F -c -I $(Z3_OCAML) z3.cmxa -I ./$(INCLUDE_OS_DIR) Perf.cmxa proverapi.cmx z3v2prover.ml
+	${OCAMLOPT} $(OCAMLCFLAGS) -warn-error F -c -I $(Z3_OCAML) z3.cmxa -I ./$(INCLUDE_OS_DIR) $(NUMS)/nums.cmxa Perf.cmxa proverapi.cmx z3v2prover.ml
 
 z3v4prover.cmx: $(INCLUDE_OS_DIR)/Perf.cmxa proverapi.cmx z3v4prover.ml
 	@echo "  OCAMLOPT " $@
-	${OCAMLOPT} $(OCAMLCFLAGS) -warn-error F -c -I $(Z3_OCAML) z3.cmxa -I ./$(INCLUDE_OS_DIR) Perf.cmxa proverapi.cmx z3v4prover.ml
+	${OCAMLOPT} $(OCAMLCFLAGS) -warn-error F -c -I $(Z3_OCAML) z3.cmxa -I ./$(INCLUDE_OS_DIR) $(NUMS)/nums.cmxa Perf.cmxa proverapi.cmx z3v4prover.ml
 
 z3v4dot5prover.cmx: $(INCLUDE_OS_DIR)/Perf.cmxa proverapi.cmx z3v4dot5prover.ml
 	@echo "  OCAMLOPT " $@
-	${OCAMLOPT} $(OCAMLCFLAGS) -warn-error F -c -I $(Z3_OCAML) -I ./$(INCLUDE_OS_DIR) Perf.cmxa proverapi.cmx z3v4dot5prover.ml
+	${OCAMLOPT} $(OCAMLCFLAGS) -warn-error F -c -I $(Z3_OCAML) -I ./$(INCLUDE_OS_DIR) $(NUMS)/nums.cmxa Perf.cmxa proverapi.cmx z3v4dot5prover.ml
 
 clean::
 	rm -f shape_analysis/*.cm[ix] shape_analysis/*.cmo
