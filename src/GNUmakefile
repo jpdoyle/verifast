@@ -146,7 +146,7 @@ else
   Z3PRESENT=false
 endif
 
-NUMS ?= $(shell ocamlfind query -qe nums || ocamlfind query nums)
+NUMS ?= $(shell ocamlfind query -qe num || ocamlfind query num)
 
 ../lib/libgtksourceview-2.0.0.dylib:
 	mkdir -p ../lib
