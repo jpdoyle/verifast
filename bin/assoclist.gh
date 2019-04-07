@@ -131,7 +131,7 @@ lemma void assoc_append_l<t1, t2>(t1 key, list<pair<t1, t2> > map1,  list<pair<t
   requires mem(key, keys(map1)) == true;
   ensures assoc(key, append(map1, map2)) == assoc(key, map1);
 
-lemma_auto void keys_remove_assoc<t1, t2>(t1 key, list<pair<t1, t2> > map);
+lemma_auto(keys(remove_assoc(key,map))) void keys_remove_assoc<t1, t2>(t1 key, list<pair<t1, t2> > map);
   requires true;
   ensures keys(remove_assoc(key, map)) == remove(key, keys(map));
 
@@ -139,7 +139,7 @@ lemma void remove_assoc_preserves_other_entries<t1, t2>(t1 key, t1 removed, list
   requires mem(key, keys(map)) == true && key != removed;
   ensures mem(key, keys(remove_assoc(removed, map))) == true &*& assoc(key, remove_assoc(removed, map)) == assoc(key, map);
 
-lemma_auto void length_remove_assoc<t1, t2>(t1 key, list<pair<t1, t2> > map);
+lemma_auto(length(remove_assoc(key,map))) void length_remove_assoc<t1, t2>(t1 key, list<pair<t1, t2> > map);
   requires true;
   ensures length(remove_assoc(key, map)) == (mem(key, keys(map)) ? length(map) - 1 : length(map));
 
