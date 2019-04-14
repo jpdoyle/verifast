@@ -3137,6 +3137,16 @@ let verify_program_core (* ?verify_program_core *)
     (breakpoint : (string * int) option)
     (targetPath : int list option) : unit =
 
+  let rec pow b n = match n with
+      0 -> 1
+    | _ -> b * (pow b (n-1))
+  in
+  let m = pow 2 20 in
+  (* OCAMLRUNPARAM=s=128M,i=128M,o=150 *)
+  Gc.set { (Gc.get()) with Gc.minor_heap_size      = 128 * m };
+  Gc.set { (Gc.get()) with Gc.major_heap_increment = 128 * m };
+  Gc.set { (Gc.get()) with Gc.space_overhead       = 150 };
+
   let module VP = VerifyProgram(struct
     let emitter_callback = emitter_callback
     type typenode = typenode'
