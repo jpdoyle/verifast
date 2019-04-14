@@ -10,14 +10,14 @@ open Verifast0
 open Ast
 
 type callbacks = {
-  reportRange: range_kind -> loc0 -> unit;
+  reportRange: range_kind -> loc0 -> bool -> unit;
   reportUseSite: decl_kind -> loc0 -> loc0 -> unit;
   reportExecutionForest: node list ref -> unit;
   reportStmt: loc0 -> unit;
   reportStmtExec: loc0 -> unit
 }
 
-let noop_callbacks = {reportRange = (fun _ _ -> ()); reportUseSite = (fun _ _ _ -> ()); reportExecutionForest = (fun _ -> ()); reportStmt = (fun _ -> ()); reportStmtExec = (fun _ -> ())}
+let noop_callbacks = {reportRange = (fun _ _ _ -> ()); reportUseSite = (fun _ _ _ -> ()); reportExecutionForest = (fun _ -> ()); reportStmt = (fun _ -> ()); reportStmtExec = (fun _ -> ())}
 
 module type VERIFY_PROGRAM_ARGS = sig
   val emitter_callback: package list -> unit

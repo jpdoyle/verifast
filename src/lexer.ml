@@ -428,13 +428,15 @@ let make_lexer_core keywords ghostKeywords startpos text reportRange inComment i
     report_nontrivial_token();
     try
       let t = Hashtbl.find (get_kwd_table()) id in
-      if isAlpha then
-        reportRange (if !ghost_range_start = None then KeywordRange else GhostKeywordRange) (current_loc());
+      reportRange (if !ghost_range_start = None then KeywordRange else
+          GhostKeywordRange) (current_loc()) isAlpha;
       if id = "include" then in_include_directive := true; 
       t
     with
       Not_found -> Ident id
   and keyword_or_error s =
+    reportRange (if !ghost_range_start = None then KeywordRange else
+        GhostKeywordRange) (current_loc()) false;
     try Hashtbl.find (get_kwd_table()) s with
       Not_found -> error ("Illegal character: " ^ s)
   in
@@ -556,7 +558,7 @@ let make_lexer_core keywords ghostKeywords startpos text reportRange inComment i
       if s = annotEnd then
       begin
         ghost_range_end();
-        reportRange GhostRangeDelimiter (current_loc());
+        reportRange GhostRangeDelimiter (current_loc()) false;
         Some (Kwd "@*/")
       end
       else
@@ -708,7 +710,7 @@ let make_lexer_core keywords ghostKeywords startpos text reportRange inComment i
   and ghost_range_end_at srcpos =
     match !ghost_range_start with
       None -> ()
-    | Some sp -> reportRange GhostRange (sp, srcpos); ghost_range_start := None
+    | Some sp -> reportRange GhostRange (sp, srcpos) false; ghost_range_start := None
   and ghost_range_end () = ghost_range_end_at (current_srcpos())
   and maybe_comment () =
     match text_peek () with
@@ -722,7 +724,7 @@ let make_lexer_core keywords ghostKeywords startpos text reportRange inComment i
             if !ghost_range_start <> None then raise Stream.Failure;
             in_single_line_annotation := true;
             ghost_range_start := Some !token_srcpos;
-            reportRange GhostRangeDelimiter (current_loc());
+            reportRange GhostRangeDelimiter (current_loc()) false;
             Some (Kwd "/*@")
           end
         | _ ->
@@ -743,7 +745,7 @@ let make_lexer_core keywords ghostKeywords startpos text reportRange inComment i
           text_junk ();
           if !ghost_range_start <> None then raise Stream.Failure;
           ghost_range_start := Some !token_srcpos;
-          reportRange GhostRangeDelimiter (current_loc());
+          reportRange GhostRangeDelimiter (current_loc()) false;
           Some (Kwd "/*@")
         | '~' -> text_junk (); reportShouldFail (current_loc()); multiline_comment ()
         | _ -> multiline_comment ()
@@ -758,7 +760,7 @@ let make_lexer_core keywords ghostKeywords startpos text reportRange inComment i
     | _ -> single_line_comment_rest ()
   and single_line_comment_rest () =
     match text_peek () with
-      '\010' | '\013' | '\000' -> reportRange CommentRange (current_loc())
+      '\010' | '\013' | '\000' -> reportRange CommentRange (current_loc()) false
     | c -> text_junk (); single_line_comment_rest ()
   and multiline_comment () =
     match text_peek () with
@@ -767,7 +769,7 @@ let make_lexer_core keywords ghostKeywords startpos text reportRange inComment i
         text_junk ();
         (
           match text_peek () with
-            '/' -> (text_junk (); reportRange CommentRange (current_loc()); next_token ())
+            '/' -> (text_junk (); reportRange CommentRange (current_loc()) false; next_token ())
           | _ -> multiline_comment ()
         )
       )
@@ -783,7 +785,7 @@ let make_lexer_core keywords ghostKeywords startpos text reportRange inComment i
     | '\000' when not exceptionOnError ->
       in_ghost_range := !ghost_range_start <> None;
       in_comment := true;
-      reportRange CommentRange (current_loc());
+      reportRange CommentRange (current_loc()) false;
       None
     | _ -> (text_junk (); multiline_comment ())
   in
@@ -795,8 +797,8 @@ let make_lexer_core keywords ghostKeywords startpos text reportRange inComment i
           Some t -> Some (current_loc(), t)
         | None -> None
       with
-        Stream.Error msg when not exceptionOnError -> reportRange ErrorRange (current_loc()); Some (current_loc(), ErrorToken)
-      | Stream.Failure when not exceptionOnError -> reportRange ErrorRange (current_loc()); Some (current_loc(), ErrorToken)
+        Stream.Error msg when not exceptionOnError -> reportRange ErrorRange (current_loc()) false; Some (current_loc(), ErrorToken)
+      | Stream.Failure when not exceptionOnError -> reportRange ErrorRange (current_loc()) false; Some (current_loc(), ErrorToken)
       )),
    in_comment,
    in_ghost_range)

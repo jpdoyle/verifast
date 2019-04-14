@@ -49,7 +49,7 @@ let build_context paths jars =
   in
   recurse_specs [] jars
 
-let rec parse_java_files_with_frontend (paths: string list) (jars: string list) (reportRange: range_kind -> loc0 -> unit) reportShouldFail verbose enforceAnnotations: package list =
+let rec parse_java_files_with_frontend (paths: string list) (jars: string list) (reportRange: range_kind -> loc0 -> bool -> unit) reportShouldFail verbose enforceAnnotations: package list =
   let context_new = build_context paths jars in
   found_java_spec_files := Util.list_remove_dups (!found_java_spec_files @ context_new);
   let context_for_paths = List.filter (fun x -> not (List.mem ((Filename.chop_extension x) ^ ".javaspec") paths)) !found_java_spec_files in
@@ -87,7 +87,7 @@ let rec parse_java_files_with_frontend (paths: string list) (jars: string list) 
     | [] -> []
     | _ -> (parse paths)
 
-let parse_java_files (paths: string list) (jars: string list) (reportRange: range_kind -> loc0 -> unit) reportShouldFail verbose enforceAnnotations useJavaFrontend: package list =
+let parse_java_files (paths: string list) (jars: string list) (reportRange: range_kind -> loc0 -> bool -> unit) reportShouldFail verbose enforceAnnotations useJavaFrontend: package list =
   if useJavaFrontend then
     parse_java_files_with_frontend paths jars reportRange reportShouldFail verbose enforceAnnotations
   else

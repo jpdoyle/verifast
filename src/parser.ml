@@ -1590,7 +1590,7 @@ let noop_preprocessor stream =
   in
   Stream.from next
 
-let parse_scala_file (path: string) (reportRange: range_kind -> loc0 -> unit): package =
+let parse_scala_file (path: string) (reportRange: range_kind -> loc0 -> bool -> unit): package =
   let lexer = make_lexer Scala.keywords ghost_keywords in
   let (loc, ignore_eol, token_stream) = lexer path (readFile path) reportRange (fun x->()) in
   let parse_decls_eof = parser [< ds = rep Scala.parse_decl; '(_, Eof) >] -> PackageDecl(dummy_loc,"",[Import(dummy_loc,Real,"java.lang",None)],ds) in
@@ -1604,7 +1604,7 @@ let parse_scala_file (path: string) (reportRange: range_kind -> loc0 -> unit): p
   old way to parse java files, these files (including non-run-time javaspec files)
   can now be handled by the Java frontend
 *)
-let parse_java_file_old (path: string) (reportRange: range_kind -> loc0 -> unit) reportShouldFail verbose enforceAnnotations: package =
+let parse_java_file_old (path: string) (reportRange: range_kind -> loc0 -> bool -> unit) reportShouldFail verbose enforceAnnotations: package =
   Stopwatch.start parsing_stopwatch;
   if verbose = -1 then Printf.printf "%10.6fs: >> parsing Java file: %s \n" (Perf.time()) path;
   let result =
@@ -1660,7 +1660,7 @@ let rec parse_include_directives (verbose: int) (enforceAnnotations: bool) (data
   in
   parse_include_directives_core []
 
-let parse_c_file (path: string) (reportRange: range_kind -> loc0 -> unit) (reportShouldFail: loc0 -> unit) (verbose: int) 
+let parse_c_file (path: string) (reportRange: range_kind -> loc0 -> bool -> unit) (reportShouldFail: loc0 -> unit) (verbose: int) 
             (include_paths: string list) (define_macros: string list) (enforceAnnotations: bool) (dataModel: data_model): ((loc * (include_kind * string * string) * string list * package list) list * package list) = (* ?parse_c_file *)
   Stopwatch.start parsing_stopwatch;
   if verbose = -1 then Printf.printf "%10.6fs: >> parsing C file: %s \n" (Perf.time()) path;
@@ -1684,7 +1684,7 @@ let parse_c_file (path: string) (reportRange: range_kind -> loc0 -> unit) (repor
   Stopwatch.stop parsing_stopwatch;
   result
 
-let parse_header_file (path: string) (reportRange: range_kind -> loc0 -> unit) (reportShouldFail: loc0 -> unit) (verbose: int) 
+let parse_header_file (path: string) (reportRange: range_kind -> loc0 -> bool -> unit) (reportShouldFail: loc0 -> unit) (verbose: int) 
          (include_paths: string list) (define_macros: string list) (enforceAnnotations: bool) (dataModel: data_model): ((loc * (include_kind * string * string) * string list * package list) list * package list) =
   Stopwatch.start parsing_stopwatch;
   if verbose = -1 then Printf.printf "%10.6fs: >> parsing Header file: %s \n" (Perf.time()) path;

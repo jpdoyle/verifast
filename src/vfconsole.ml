@@ -75,7 +75,7 @@ let _ =
     if emitHighlightedSourceFiles then
     begin
       let sourceFiles : (string * (((int * int) * (int * int)) * range_kind) list ref) list ref = ref [] in
-      let range_callback kind ((path1, line1, col1), (path2, line2, col2)) =    
+      let range_callback kind ((path1, line1, col1), (path2, line2, col2)) isAlpha =    
         assert (path1 = path2);
         let path = path1 in
         let ranges =
@@ -175,7 +175,7 @@ let _ =
       List.iter emit_source_file !sourceFiles
     end
     else
-      verify (fun _ _ -> ())
+      verify (fun _ _ _ -> ())
   in
   let stats = ref false in
   let verbose = ref 0 in
