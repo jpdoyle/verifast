@@ -504,10 +504,12 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
       showRightMarginAction#set_sensitive true;
       showRightMarginAction#set_active (tab#mainView#view#show_right_margin)
   in
-  let tag_name_of_range_kind kind =
+  let tag_name_of_range_kind kind isAlpha =
     match kind with
-      KeywordRange -> "keyword"
-    | GhostKeywordRange -> "ghostKeyword"
+      KeywordRange ->
+        if isAlpha then "keyword" else "symbol"
+    | GhostKeywordRange ->
+        if isAlpha then "ghostKeyword" else "ghostSymbol"
     | GhostRange -> "ghostRange"
     | GhostRangeDelimiter -> "ghostRangeDelimiter"
     | CommentRange -> "comment"
@@ -555,8 +557,8 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
     let stopIsInGhostRange = stop#has_tag ghostRangeTag && not (stop#ends_tag (Some ghostRangeTag)) || stop#begins_tag (Some ghostRangeTag) in
     (* Printf.printf "startIsInComment: %B; startIsInGhostRange: %B; stopIsInComment: %B; stopIsInGhostRange: %B\n" startIsInComment startIsInGhostRange stopIsInComment stopIsInGhostRange; flush stdout; *)
     buffer#remove_all_tags ~start:start ~stop:stop;
-    let reportRange kind ((_, line1, col1), (_, line2, col2)) =
-      apply_tag_by_name tab (tag_name_of_range_kind kind) ~start:(srcpos_iter buffer (startLine + line1, col1)) ~stop:(srcpos_iter buffer (startLine + line2, col2))
+    let reportRange kind ((_, line1, col1), (_, line2, col2)) isAlpha =
+      apply_tag_by_name tab (tag_name_of_range_kind kind isAlpha) ~start:(srcpos_iter buffer (startLine + line1, col1)) ~stop:(srcpos_iter buffer (startLine + line2, col2))
     in
     let text = start#get_text ~stop:stop in
     let highlight keywords =
@@ -635,8 +637,10 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
     let apply_tag_enabled = ref false in (* To prevent tag copying when pasting from clipboard *)
     ignore $. buffer#connect#apply_tag (fun tag ~start ~stop -> if not !apply_tag_enabled then GtkSignal.emit_stop_by_name buffer#as_buffer "apply-tag");
     let _ = buffer#create_tag ~name:"keyword" [`WEIGHT `BOLD; `FOREGROUND "Blue"] in
-    let _ = buffer#create_tag ~name:"ghostRange" [`FOREGROUND "#CC6600"] in
+    let _ = buffer#create_tag ~name:"symbol" [`FOREGROUND "Gray"] in
+    let _ = buffer#create_tag ~name:"ghostRange" [`FOREGROUND "#772200"] in
     let _ = buffer#create_tag ~name:"ghostKeyword" [`WEIGHT `BOLD; `FOREGROUND "#DB9900"] in
+    let _ = buffer#create_tag ~name:"ghostSymbol" [`WEIGHT `HEAVY; `FOREGROUND "#BB8888"] in
     let _ = buffer#create_tag ~name:"comment" [`FOREGROUND "#008000"] in
     let _ = buffer#create_tag ~name:"ghostRangeDelimiter" [`FOREGROUND "Gray"] in
     let _ = buffer#create_tag ~name:"error" [`UNDERLINE `DOUBLE; `FOREGROUND "Red"] in
@@ -954,6 +958,27 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
       | Executing (h, env, l, msg)::cs ->
         let it = stepStore#append ?parent:(match itstack with [] -> None | it::_ -> Some it) () in
         let l = create_marks_of_loc (root_caller_token l) in
+        let h = (match lastItem with
+            None -> h
+          | Some (_, h', _, _, _, _) ->
+            let orig_h  = List.map string_of_chunk h  in
+            let orig_h' = List.map string_of_chunk h' in
+            let rec iter h h' =
+                match h, h' with
+                  [], [] -> []
+                | [], c'::h' ->
+                    if not (List.mem (string_of_chunk c') orig_h ) then
+                        iter h h'
+                    else
+                        c'::iter h h'
+                | c::h, h' ->
+                    if not (List.mem (string_of_chunk c ) orig_h') then
+                        c ::iter h h'
+                    else
+                        iter h h'
+            in
+            iter h h'
+        ) in
         let stepItem = (ass, h, env, l, msg, locstack) in
         stepStore#set ~row:it ~column:stepDataCol stepItem;
         stepStore#set ~row:it ~column:stepCol msg;
@@ -980,6 +1005,20 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
         iter lastItem itstack (Some it) ass locstack last_loc last_env cs
     in
     stepItems := Some (iter None [] None [] [] None None ctxts_fifo)
+  in
+  let prepend_items (store:GTree.list_store) kcol col foreground_col strikethrough_col items =
+    let rec iter k items =
+      match items with
+        [] -> ()
+      | (item, foreground, strikethrough)::items ->
+        let gIter = store#prepend() in
+        store#set ~row:gIter ~column:kcol k;
+        store#set ~row:gIter ~column:col item;
+        store#set ~row:gIter ~column:foreground_col foreground;
+        store#set ~row:gIter ~column:strikethrough_col strikethrough;
+        iter (k + 1) items
+    in
+    iter 0 items
   in
   let append_items (store:GTree.list_store) kcol col foreground_col strikethrough_col items =
     let rec iter k items =
@@ -1117,7 +1156,7 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
           in
           iter delta ass
       in
-      append_items assumptionsStore assumptionsKCol assumptionsCol assumptionsForegroundCol assumptionsStrikethroughCol (List.rev assRows);
+      prepend_items assumptionsStore assumptionsKCol assumptionsCol assumptionsForegroundCol assumptionsStrikethroughCol (List.rev assRows);
       let compare_chunks (Chunk ((g, literal), targs, coef, ts, size)) (Chunk ((g', literal'), targs', coef', ts', size')) =
         let r = compare g g' in
         if r <> 0 then r else
@@ -1136,20 +1175,26 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
         compare coef coef'
       in
       let chunksRows =
-        let h = List.map string_of_chunk (List.sort compare_chunks h) in
+        let h = List.map string_of_chunk (h) in
+        let orig_h = h in
         match prevStep with
           None -> List.map (fun c -> (c, unchangedRowColor, false)) h
         | Some (_, h', _, _, _, _) ->
-          let h' = List.map string_of_chunk (List.sort compare_chunks h') in
+          let h' = List.map string_of_chunk (h') in
+          let orig_h' = h' in
           let rec iter h h' =
             match h, h' with
               [], [] -> []
-            | c::h, c'::h' when c = c' ->
-              (c, unchangedRowColor, false)::iter h h'
-            | h, c'::h' when not (List.mem c' h) ->
-              (c', deletedRowColor, true)::iter h h'
+            | [], c'::h' ->
+                if not (List.mem c' orig_h ) then
+                    (c', deletedRowColor, true)::iter h h'
+                else
+                    (c', unchangedRowColor, false)::iter h h'
             | c::h, h' ->
-              (c, newRowColor, false)::iter h h'
+                if not (List.mem c  orig_h') then
+                    (c, newRowColor, false)::iter h h'
+                else
+                    iter h h'
           in
           iter h h'
       in
@@ -1164,10 +1209,11 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
     stepStore#get_path lastStep
   in
   let updateStepListView() =
-    stepList#expand_all();
+    stepList#collapse_all();
     let lastStepRowPath = get_last_step_path() in
+    stepList#expand_to_path lastStepRowPath;
     let _ = stepList#selection#select_path lastStepRowPath in
-    Glib.Idle.add (fun () -> stepList#scroll_to_cell lastStepRowPath stepViewCol; false)
+    Glib.Idle.add (fun () -> stepList#scroll_to_cell ~align:(0.0,0.0) lastStepRowPath stepViewCol; false)
   in
   let ensureSaved tab =
     if tab#buffer#modified then
@@ -1264,8 +1310,8 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
     if l <> dummy_loc then
       go_to_loc (root_caller_token l)
   in
-  let reportRange kind l =
-    apply_tag_by_loc (tag_name_of_range_kind kind) l
+  let reportRange kind l isAlpha =
+    apply_tag_by_loc (tag_name_of_range_kind kind isAlpha) l
   in
   let reportUseSite declKind declLoc useSiteLoc =
     let (useSiteStart, useSiteStop) = useSiteLoc in
