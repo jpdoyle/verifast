@@ -148,6 +148,9 @@ endif
 
 NUMS ?= $(shell ocamlfind query -qe num || ocamlfind query num)
 
+clean::
+	rm -Rf ../lib
+
 ../lib/libgtksourceview-2.0.0.dylib:
 	mkdir -p ../lib
 	for i in $$( cat vfide-osx-local-dlls.txt ); do cp $$i ../lib; done
