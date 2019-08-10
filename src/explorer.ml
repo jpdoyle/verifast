@@ -14,7 +14,7 @@ let _ =
 
   (* Callbacks for parser *)
   let sourceFiles : (string * (((int * int) * (int * int)) * range_kind) list ref) list ref = ref [] in
-  let reportRange kind ((path1, line1, col1), (path2, line2, col2)) =    
+  let reportRange kind ((path1, line1, col1), (path2, line2, col2)) _ =    
     assert (path1 = path2);
     let path = path1 in
     let ranges =
@@ -31,10 +31,10 @@ let _ =
   in
 
   let shouldFailLocs: loc0 list ref = ref [] in
-  let reportShouldFail l _ = shouldFailLocs := l::!shouldFailLocs in
+  let reportShouldFail l = shouldFailLocs := l::!shouldFailLocs in
 
   (* Custom parser *)
-  let parse_c_file_custom (path: string) (reportRange: range_kind -> loc0 -> unit) (reportShouldFail: loc0 -> bool -> unit) (verbose: int) 
+  let parse_c_file_custom (path: string) (reportRange: range_kind -> loc0 -> bool -> unit) (reportShouldFail: loc0 -> unit) (verbose: int) 
         (include_paths: string list) (define_macros: string list) (enforceAnnotations: bool) (dataModel: data_model) (pattern_str: string): ((loc * (include_kind * string * string) * string list * package list) list * package list) = (* ?parse_c_file_custom *)
     let result =
       let make_lexer path include_paths ~inGhostRange =
