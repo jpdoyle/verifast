@@ -295,7 +295,7 @@ endif
 
 distclean:: clean
 
-INCLUDES = -I $(INCLUDE_OS_DIR) -I java_frontend -I shape_analysis -I $(NUMS)
+INCLUDES = -I $(INCLUDE_OS_DIR) -I java_frontend -I shape_analysis
 
 #------------------------------- Build normal case --------------------------#
 
