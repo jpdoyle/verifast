@@ -191,7 +191,7 @@ ifeq ($(OS), Windows_NT)
   CAMLP4O    = camlp4o.opt
 else
   #CAMLP4O      = $(firstword $(wildcard ${OCAMLBIN}/camlp4o.opt ${OCAMLBIN}/camlp4o))
-  CAMLP4O      = $(shell which camlp4o.opt)
+  CAMLP4O      = "$(shell which camlp4o.opt)"
 endif
 
 # Do we build with "-I ./linux" or "-I ./win":
