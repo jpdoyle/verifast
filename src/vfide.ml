@@ -669,9 +669,6 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
       method lineMarksTable = lineMarksTable
       method stmtExecCountsColumn = stmtExecCountsColumn
     end in
-    let () = (showLineNumbers true;
-        showLineNumbersAction#set_active
-            (tab#mainView#view#show_line_numbers);) in
     ignore $. buffer#connect#modified_changed (fun () ->
       updateBufferTitle tab;
       (* should be "no color" (i.e. theme's default), but the API does
@@ -1851,6 +1848,10 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
   end;
   root#show();
   ignore $. Glib.Idle.add (fun () -> textPaned#set_position 0; false);
+  let () = (showLineNumbers true;
+            showLineNumbersAction#set_active
+               (tab#mainView#view#show_line_numbers);
+           ) in
   GMain.main()
 
 let (code_font, trace_font) =
