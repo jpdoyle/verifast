@@ -720,6 +720,10 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
     let focusIn _ = set_current_tab (Some tab); false in
     ignore $. mainView#view#event#connect#focus_in ~callback:focusIn;
     ignore $. subView#view#event#connect#focus_in ~callback:focusIn;
+    let () = (showLineNumbers true;
+              showLineNumbersAction#set_active
+                 (tab#mainView#view#show_line_numbers);
+             ) in
     buffers := !buffers @ [tab];
     tab
   in
@@ -1848,10 +1852,6 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
   end;
   root#show();
   ignore $. Glib.Idle.add (fun () -> textPaned#set_position 0; false);
-  let () = (showLineNumbers true;
-            showLineNumbersAction#set_active
-               (tab#mainView#view#show_line_numbers);
-           ) in
   GMain.main()
 
 let (code_font, trace_font) =
