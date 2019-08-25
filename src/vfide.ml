@@ -262,8 +262,9 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
       a "TextSmaller" ~label:"_Smaller" ~accel:"<Alt>Down";
       a "TextSizeDefault" ~label:"_Default";
       (fun group -> group#add_action showLineNumbersAction);
-      showLineNumbers true;
-      showLineNumbersAction#set_active (tab#mainView#view#show_line_numbers);
+      let () = (showLineNumbers true;
+            showLineNumbersAction#set_active
+                (tab#mainView#view#show_line_numbers);) in
       (fun group -> group#add_action showWhitespaceAction);
       (fun group -> group#add_action showRightMarginAction);
       a "Verify" ~label:"_Verify";
