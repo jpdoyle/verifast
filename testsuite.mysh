@@ -29,7 +29,7 @@ cd examples
     verifast -prover z3v4.5 -disable_overflow_check -shared ghost_counters.c monitors.o readers_writers.c 
   cd ..
   cd splitcounter
-    verifast -prover redux -c -disable_overflow_check splitcounter.c
+    verifast atomics.o ghost_lists.c splitcounter.c client.c
   cd ..
   cd crypto_ccs
     call crypto_ccs.mysh
@@ -177,7 +177,7 @@ cd examples
   verifast_both -c limits.c
   verifast_both map.c
   cd mcas
-    verifast_both -c -disable_overflow_check rdcss.c mcas.c mcas_client.c
+    call mcas.mysh
   cd ..
   verifast_both -c mergesort_and_binarysearch.c
   cd MockKernel
@@ -216,6 +216,7 @@ cd examples
   verifast_both spouse.c
   verifast_both -c spouse-user.c
   verifast_both -disable_overflow_check -shared stack.c
+  verifast_both -disable_overflow_check -shared stack_typeparam.c
   verifast_both struct_fields.c
   verifast_both swap.c
   verifast_both -c switch.c
@@ -408,7 +409,11 @@ cd tutorial_solutions
   verifast_both students.c
 cd ..
 cd tests
+  verifast -c -prover z3v4.5 prod_func_ptr_chunk_ftargs_convert_provertype.c
+  verifast -c -allow_should_fail russell_predctors.c
   verifast -c -allow_should_fail any_russell.c
+  verifast -c -allow_should_fail any_russell2.c
+  verifast -c -allow_should_fail any_russell3.c
   verifast -c typedef_enum_with_body.c
   verifast -c -allow_should_fail noreturn.c
   verifast_both -c redux_nonlinear_mult.c

@@ -98,7 +98,7 @@ let rec sexpr_of_type_ (t : type_) : sexpression =
     | TypeParam (s)           -> List [ Symbol "type-param";
                                         Symbol s ]
     | InferredType (_, i)     -> List [ Symbol "type-inferred";
-                                        sexpr_of_option sexpr_of_type_ !i]
+                                        sexpr_of_inferred_type_state !i]
     | ClassOrInterfaceName (s)-> List [ Symbol "type-class-or-interface-name";
                                         Symbol s ]
     | PackageName (s)         -> List [ Symbol "type-package-name";
@@ -107,6 +107,10 @@ let rec sexpr_of_type_ (t : type_) : sexpression =
                                         sexpr_of_type_ t ]
     | AbstractType (s)         -> List [ Symbol "type-abstract";
                                         Symbol s ]
+and sexpr_of_inferred_type_state = function
+    Unconstrained -> List [ Symbol "inferred-type-state-unconstrained" ]
+  | ContainsAnyConstraint allowContainsAnyPositive -> List [ Symbol "inferred-type-state-contains-any-constraint"; sexpr_of_bool allowContainsAnyPositive ]
+  | EqConstraint t -> List [ Symbol "inferred-type-state-eq-constraint"; sexpr_of_type_ t ]
 
 let rec sexpr_of_type_expr : type_expr -> sexpression = function
   | StructTypeExpr (_, name, _)  -> 
@@ -510,12 +514,13 @@ let rec sexpr_of_stmt (stmt : stmt) : sexpression =
     | ExprStmt expr ->
       List [ Symbol "stmt-expression"
            ; sexpr_of_expr expr ]
-    | WhileStmt (loc, cond, invariant, expr, body) ->
+    | WhileStmt (loc, cond, invariant, expr, body, final_ss) ->
       build_list [ Symbol "stmt-while" ]
                  [ "condition", sexpr_of_expr cond
                  ; "invariant", sexpr_of_option sexpr_of_loop_spec invariant
                  ; "unknown", sexpr_of_option sexpr_of_expr expr
-                 ; "body", sexpr_of_list sexpr_of_stmt body ]
+                 ; "body", sexpr_of_list sexpr_of_stmt body
+                 ; "final-ss", sexpr_of_list sexpr_of_stmt final_ss ]
     | DeclStmt (loc, xs) ->
       let sexpr_of_local (lx, tx, str, expr, _) =
         let initialization =

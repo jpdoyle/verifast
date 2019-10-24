@@ -152,6 +152,7 @@ endif
 
 clean::
 	rm -Rf ../lib
+	-rm ../bin/libz3.dll
 
 ../lib/libgtksourceview-2.0.0.dylib:
 	mkdir -p ../lib
@@ -271,6 +272,7 @@ STDLIB_FILES_GEN = \
        ../bin/list.vfmanifest \
        ../bin/listex.vfmanifest \
        ../bin/raw_ghost_lists.vfmanifest \
+       ../bin/strong_ghost_lists.vfmanifest \
        ../bin/arrays.vfmanifest \
        ../bin/quantifiers.vfmanifest \
        ../bin/assoclist.vfmanifest \

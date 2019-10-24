@@ -1,7 +1,7 @@
 #include "stdlib.h"
 #include "atomics.h"
 #include "rdcss.h"
-//@ #include "bitops.gh"
+//@ #include "bitops_ex.gh"
 //@ #include "ghost_cells_ex.gh"
 //@ #include "ghost_lists.gh"
 
@@ -478,6 +478,7 @@ loop:
         @*/
         //@ close atomic_compare_and_store_pointer_context_pre(context)(inv, a2, o2, (void *)((uintptr_t)d | 1), prophecy);
         //@ produce_lemma_function_pointer_chunk(context);
+        //@ produce_limits(d);
         r = atomic_compare_and_store_pointer(prophecyId, a2, o2, (void *)((uintptr_t)d | 1));
         //@ leak is_atomic_compare_and_store_pointer_context(context);
         //@ open atomic_compare_and_store_pointer_context_post(context)();

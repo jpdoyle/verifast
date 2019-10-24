@@ -117,11 +117,26 @@ type type_ = (* ?type_ *)
   | HandleIdType (* handle type, for shared boxes *)
   | AnyType (* supertype of all inductive datatypes; useful in combination with predicate families *)
   | TypeParam of string (* a reference to a type parameter declared in the enclosing datatype/function/predicate *)
-  | InferredType of < > * type_ option ref (* inferred type, is unified during type checking. '< >' is the type of objects with no methods. This hack is used to prevent types from incorrectly comparing equal, as in InferredType (ref None) = InferredType (ref None). Yes, ref None = ref None. But object end <> object end. *)
+  | InferredType of < > * inferred_type_state ref (* inferred type, is unified during type checking. '< >' is the type of objects with no methods. This hack is used to prevent types from incorrectly comparing equal, as in InferredType (ref Unconstrained) = InferredType (ref Unconstrained). Yes, ref Unconstrained = ref Unconstrained. But object end <> object end. *)
   | ClassOrInterfaceName of string (* not a real type; used only during type checking *)
   | PackageName of string (* not a real type; used only during type checking *)
   | RefType of type_ (* not a real type; used only for locals whose address is taken *)
   | AbstractType of string
+and inferred_type_state =
+    Unconstrained
+  | ContainsAnyConstraint of bool (* allow the type to contain 'any' in positive positions *)
+  | EqConstraint of type_
+
+let inferred_type_constraint_le c1 c2 =
+  match c1, c2 with
+    _, Unconstrained -> true
+  | Unconstrained, _ -> false
+  | _, ContainsAnyConstraint true -> true
+  | ContainsAnyConstraint true, _ -> false
+  | ContainsAnyConstraint false, ContainsAnyConstraint false -> true
+
+let inferred_type_constraint_meet c1 c2 =
+  if inferred_type_constraint_le c1 c2 then c1 else c2
 
 type integer_limits = {max_unsigned_big_int: big_int; min_signed_big_int: big_int; max_signed_big_int: big_int}
 
@@ -511,7 +526,8 @@ and
       expr *
       loop_spec option *
       expr option * (* decreases clause *)
-      stmt list
+      stmt list * (* body *)
+      stmt list (* statements to be executed after the body: for increment or do-while condition check. 'continue' jumps here. *)
   | BlockStmt of
       loc *
       decl list *
@@ -871,7 +887,7 @@ let stmt_loc s =
   | Open (l, _, _, _, _, _, coef) -> l
   | Close (l, _, _, _, _, _, coef) -> l
   | ReturnStmt (l, _) -> l
-  | WhileStmt (l, _, _, _, _) -> l
+  | WhileStmt (l, _, _, _, _, _) -> l
   | Throw (l, _) -> l
   | TryCatch (l, _, _) -> l
   | TryFinally (l, _, _, _) -> l
@@ -904,7 +920,7 @@ let stmt_fold_open f state s =
       | SwitchStmtDefaultClause (l, ss) -> List.fold_left f state ss
     in
     List.fold_left iter state cs
-  | WhileStmt (l, _, _, _, ss) -> List.fold_left f state ss
+  | WhileStmt (l, _, _, _, ss, final_ss) -> let state = List.fold_left f state ss in List.fold_left f state final_ss
   | TryCatch (l, ss, ccs) ->
     let state = List.fold_left f state ss in
     List.fold_left (fun state (_, _, _, ss) -> List.fold_left f state ss) state ccs

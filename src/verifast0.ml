@@ -97,7 +97,7 @@ let rec string_of_type t =
   | HandleIdType -> "handle"
   | AnyType -> "any"
   | TypeParam x -> x
-  | InferredType (_, t) -> begin match !t with None -> "?" | Some t -> string_of_type t end
+  | InferredType (_, t) -> begin match !t with EqConstraint t -> string_of_type t | _ -> "?" end
   | ArrayType(t) -> (string_of_type t) ^ "[]"
   | StaticArrayType(t, s) -> (string_of_type t) ^ "[" ^ (string_of_int s) ^ "]" 
   | ClassOrInterfaceName(n) -> n (* not a real type; used only during type checking *)
@@ -130,6 +130,7 @@ type options = {
   option_disable_overflow_check: bool;
   option_allow_should_fail: bool;
   option_emit_manifest: bool;
+  option_check_manifest: bool;
   option_vroots: (string * string) list;
   option_allow_assume: bool;
   option_simplify_terms: bool;

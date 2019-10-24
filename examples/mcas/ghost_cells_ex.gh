@@ -1,5 +1,5 @@
-#ifndef GHOST_CELLS_H
-#define GHOST_CELLS_H
+#ifndef GHOST_CELLS_EX_H
+#define GHOST_CELLS_EX_H
 
 predicate ghost_cell3(int id; int v1, int v2, int v3);
 
@@ -34,7 +34,7 @@ lemma void counted_ghost_cell_dispose_ticket<t>(int id);
 
 lemma void counted_ghost_cell_match_ticket<t>(int id);
     requires counted_ghost_cell<t>(id, ?value, ?count) &*& counted_ghost_cell_ticket<t>(id, ?value0);
-    ensures counted_ghost_cell<t>(id, value, count) &*& counted_ghost_cell_ticket<t>(id, value) &*& value0 == value;    
+    ensures counted_ghost_cell<t>(id, value, count) &*& counted_ghost_cell_ticket<t>(id, value) &*& value0 == value;
 
 lemma void counted_ghost_cell_update<t>(int id, t x);
     requires counted_ghost_cell<t>(id, _, 0);

@@ -12,6 +12,25 @@ open Verifast1
 open Assertions
 open Verify_expr
 
+exception FileNotFound of string
+
+let read_file_lines path =
+  if Sys.file_exists path then
+    let file = open_in path in
+    do_finally (fun () ->
+      let rec iter () =
+        try
+          let line = input_line file in
+          let n = String.length line in
+          let line = if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line in
+          line::iter()
+        with
+          End_of_file -> []
+      in
+      iter()
+    ) (fun () -> close_in file)
+  else raise (FileNotFound path)
+
 module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
   
   include VerifyExpr(VerifyProgramArgs)
@@ -167,14 +186,16 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               | Some bs -> bs
             in
             let xmap = List.map (fun (x, tp0) -> let tp = instantiate_type tpenv tp0 in (x, tp, tp0)) xmap in
-            let ftargenv =
+            let args =
               match zip ftxmap args with
                 None -> static_error l "Incorrect number of function pointer chunk arguments" None
               | Some bs ->
                 List.map
-                  begin fun ((x, tp), e) ->
-                    let w = check_expr_t (pn,ilist) tparams tenv e (instantiate_type tpenv tp) in
-                    (x, ev w)
+                  begin fun ((x, tp0), e) ->
+                    let tp = instantiate_type tpenv tp0 in
+                    let w = check_expr_t (pn,ilist) tparams tenv e tp in
+                    let v = ev w in
+                    (x, v, prover_convert_term v tp tp0)
                   end
                   bs
             in
@@ -218,6 +239,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               let h = [] in
               with_context (Executing (h, [], openBraceLoc, "Producing function type precondition")) $. fun () ->
               with_context PushSubcontext $. fun () ->
+              let ftargenv = List.map (fun (x, v, v0) -> (x, v0)) args in
               let pre_env = [("this", fterm)] @ currentThreadEnv @ ftargenv @ List.map (fun (x, x0, tp, t, t0) -> (x0, t0)) fparams in
               produce_asn tpenv h [] pre_env pre real_unit None None $. fun h _ ft_env ->
               with_context PopSubcontext $. fun () ->
@@ -305,7 +327,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               with_context PopSubcontext $. fun () ->
               check_leaks h [] closeBraceLoc "produce_function_pointer_chunk body leaks heap chunks"
             end;
-            (ftn, ft_predfammaps, fttargs, List.map snd ftargenv)
+            (ftn, ft_predfammaps, fttargs, List.map (fun (x, v, v0) -> v) args)
           end
       in
       let [(_, (_, _, _, _, symb, _, _))] = ft_predfammaps in
@@ -385,7 +407,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             if gh <> Ghost then static_error lftn "Only lemma function types allowed here." None;
             let [(_, (_, _, _, _, p_tn, _, _))] = ft_predfammaps in p_tn
           in
-          let targs = List.map (fun _ -> InferredType (object end, ref None)) fttparams in
+          let targs = List.map (fun _ -> InferredType (object end, ref Unconstrained)) fttparams in
           let args = List.map (fun _ -> SrcPat DummyPat) ftxmap in
           consume_chunk rules h ghostenv [] [] l (p_symb, true) targs real_unit dummypat (Some (List.length ftxmap + 1)) ((SrcPat DummyPat)::args) $. fun _ h coef ts size _ _ _ ->
           produce_chunk h (p_symb, true) targs coef (Some (List.length ftxmap + 1)) ts size $. fun h ->
@@ -644,7 +666,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       let tcont _ _ _ h env = tcont sizemap tenv ghostenv h (List.filter (fun (x, _) -> List.mem_assoc x tenv) env) in
       begin match unfold_inferred_type tp with
         InductiveType (i, targs) ->
-        let (tn, targs, Some (_, itparams, ctormap, _)) = (i, targs, try_assoc' Ghost (pn,ilist) i inductivemap) in
+        let (tn, targs, Some (_, itparams, ctormap, _, _)) = (i, targs, try_assoc' Ghost (pn,ilist) i inductivemap) in
         let (Some tpenv) = zip itparams targs in
         let rec iter ctors cs =
           match cs with
@@ -835,7 +857,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             match try_assoc (g, fns) predinstmap with
               Some (predenv, _, predinst_tparams, ps, g_symb, inputParamCount, p) ->
               let (targs, tpenv) =
-                let targs = if targs = [] then List.map (fun _ -> InferredType (object end, ref None)) predinst_tparams else targs in
+                let targs = if targs = [] then List.map (fun _ -> InferredType (object end, ref Unconstrained)) predinst_tparams else targs in
                 match zip predinst_tparams targs with
                   None -> static_error l (Printf.sprintf "Predicate expects %d type arguments." (List.length predinst_tparams)) None
                 | Some bs -> (targs, bs)
@@ -951,7 +973,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         match try_assoc' Ghost (pn,ilist) p predfammap with
           None -> static_error l "No such predicate." None
         | Some (_, predfam_tparams, arity, pts, g_symb, inputParamCount, _) ->
-          let targs = if targs = [] then List.map (fun _ -> InferredType (object end, ref None)) predfam_tparams else targs in
+          let targs = if targs = [] then List.map (fun _ -> InferredType (object end, ref Unconstrained)) predfam_tparams else targs in
           let tpenv =
             match zip predfam_tparams targs with
               None -> static_error l "Incorrect number of type arguments." None
@@ -1156,7 +1178,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           begin
           match try_assoc (g, fns) predinstmap with
             Some (predenv, lpred, predinst_tparams, ps, g_symb, inputParamCount, body) ->
-            let targs = if targs = [] then List.map (fun _ -> InferredType (object end, ref None)) predinst_tparams else targs in
+            let targs = if targs = [] then List.map (fun _ -> InferredType (object end, ref Unconstrained)) predinst_tparams else targs in
             let tpenv =
               match zip predinst_tparams targs with
                 None -> static_error l "Incorrect number of type arguments." None
@@ -1385,9 +1407,10 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       tcont sizemap ((x, HandleIdType)::tenv) (x::ghostenv) (Chunk ((hpn_symb, true), [], real_unit, [handleTerm; boxIdTerm], None)::is_handle_chunks@h) ((x, handleTerm)::env)
     | ReturnStmt (l, eo) ->
       verify_return_stmt (pn,ilist) blocks_done lblenv tparams boxes pure leminfo funcmap predinstmap sizemap tenv ghostenv h env true l eo [] return_cont econt
-    | WhileStmt (l, e, None, dec, ss) ->
+    | WhileStmt (l, e, None, dec, ss, final_ss) ->
       static_error l "Loop invariant required." None
-    | WhileStmt (l, e, Some (LoopInv p), dec, ss) ->
+    | WhileStmt (l, e, Some (LoopInv p), dec, ss, final_ss) ->
+      let ss = ss @ final_ss in (* CAVEAT: if we add support for 'continue', this needs to change. *)
       if not pure then begin
         match ss with PureStmt (lp, _)::_ -> static_error lp "Pure statement not allowed here." None | _ -> ()
       end;
@@ -1453,7 +1476,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         cont h'''
       end $. fun h''' ->
       check_leaks h''' env endBodyLoc "Loop leaks heap chunks."
-    | WhileStmt (l, e, Some (LoopSpec (pre, post)), dec, ss) ->
+    | WhileStmt (l, e, Some (LoopSpec (pre, post)), dec, ss, final_ss) ->
       if not pure then begin
         match ss with PureStmt (lp, _)::_ -> static_error lp "Pure statement not allowed here." None | _ -> ()
       end;
@@ -1469,7 +1492,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           BlockStmt(_, _, ss, _, locals_to_free) :: rest -> check_block_declarations ss; (ss @ rest, locals_to_free)
         | _ -> (ss, ref [])
       in
-      let xs = (expr_assigned_variables e) @ (block_assigned_variables ss) in
+      let xs = (expr_assigned_variables e) @ (block_assigned_variables ss)  @ block_assigned_variables final_ss in
       let xs = List.filter (fun x -> match try_assoc x tenv with None -> false | Some (RefType _) -> false | _ -> true) xs in
       let (pre, tenv') = check_asn (pn,ilist) tparams tenv pre in
       let old_xs_tenv = List.map (fun x -> ("old_" ^ x, List.assoc x tenv)) xs in
@@ -1505,6 +1528,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         in
         iter [] ss
       in
+      let ss_before = ss_before @ final_ss in
       let xs_ss_after = block_assigned_variables ss_after in
       let exit_loop h' env' cont =
         execute_branch (fun () -> check_post h' env');
@@ -3003,8 +3027,11 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       do_finally (fun () ->
         List.iter (fun line -> output_string file (line ^ "\n")) !jardeps
       ) (fun () -> close_out file)
-    else
+    else begin
+      if check_manifest then
+        if read_file_lines jardeps_filename <> !jardeps then raise (CompilationError ("The manifest generated for " ^ path ^ " does not match the contents of " ^ jardeps_filename));
       jardeps_map := (jardeps_filename, !jardeps)::!jardeps_map
+    end
 
 (*
 There are 7 kinds of entries possible in a vfmanifest/dll_vfmanifest file
@@ -3113,8 +3140,11 @@ There are 7 kinds of entries possible in a vfmanifest/dll_vfmanifest file
       do_finally (fun () ->
         List.iter (fun line -> output_string file (line ^ "\n")) lines
       ) (fun () -> close_out file)
-    else
+    else begin
+      if check_manifest then
+        if read_file_lines manifest_filename <> lines then raise (CompilationError ("The manifest generated for " ^ path ^ " does not match the contents of " ^ manifest_filename));
       manifest_map := (manifest_filename, lines)::!manifest_map
+    end
   
   let () =
     if file_type path <> Java then
@@ -3234,25 +3264,6 @@ let remove_dups bs =
 
 exception LinkError of string
 
-exception FileNotFound
-
-let read_file_lines path =
-  if Sys.file_exists path then
-    let file = open_in path in
-    do_finally (fun () ->
-      let rec iter () =
-        try
-          let line = input_line file in
-          let n = String.length line in
-          let line = if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line in
-          line::iter()
-        with
-          End_of_file -> []
-      in
-      iter()
-    ) (fun () -> close_in file)
-  else raise FileNotFound
-
 let parse_line line =
   let space = String.index line ' ' in
   let command = String.sub line 0 space in
@@ -3301,11 +3312,11 @@ let link_program vroots library_paths isLibrary allModulepaths dllManifest expor
     in
     try
       get_lines file
-    with FileNotFound ->
+    with FileNotFound _ ->
       try 
         let file = replace_vroot vroots file in
         get_lines file
-      with FileNotFound ->
+      with FileNotFound _ ->
         try
           let rec search_library_paths library_paths file =
             match library_paths with 
@@ -3315,10 +3326,10 @@ let link_program vroots library_paths isLibrary allModulepaths dllManifest expor
                 get_lines search_path
               else
                search_library_paths rest file
-            | [] -> raise FileNotFound
+            | [] -> raise (FileNotFound file)
           in
           search_library_paths library_paths file
-        with FileNotFound ->
+        with FileNotFound _ ->
           failwith ("VeriFast link phase error: could not find .vfmanifest file '" ^ file ^ 
                     "'. Re-verify the module using the -emit_vfmanifest or -emit_dll_vfmanifest option.")
   in
@@ -3478,7 +3489,7 @@ let link_program vroots library_paths isLibrary allModulepaths dllManifest expor
       match exports with
         [] -> (impls, mods)
       | exportPath::exports ->
-        let lines = try read_file_lines exportPath with FileNotFound -> failwith ("Could not find export manifest file '" ^ exportPath ^ "'") in
+        let lines = try read_file_lines exportPath with FileNotFound _ -> failwith ("Could not find export manifest file '" ^ exportPath ^ "'") in
         let rec iter' (impls, mods) lines =
           match lines with
             [] -> (impls, mods)
