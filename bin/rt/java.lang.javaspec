@@ -64,8 +64,8 @@ lemma_auto void bitand_modulo(int x);
 predicate class_init_token(Class c;);
 
 fixpoint boolean Class_lt(Class c1, Class c2);
-predicate call_perm_(Class c;);
-predicate call_below_perm_(Class c;);
+predicate call_perm_(int thread, Class c;);
+predicate call_below_perm_(int thread, Class c;);
 
 predicate array_element<T>(T[] array, int index; T value);
 predicate array_slice<T>(T[] array, int start, int end; list<T> elements);
@@ -159,6 +159,7 @@ public class Throwable {
     public Throwable();
         //@ requires emp;
         //@ ensures emp;
+        //@ terminates;
     
 }
 
@@ -167,6 +168,7 @@ public class Exception extends Throwable {
     public Exception();
         //@ requires emp;
         //@ ensures emp;
+        //@ terminates;
     
 }
 
@@ -175,6 +177,7 @@ public class Error extends Throwable {
     public Error();
         //@ requires emp;
         //@ ensures emp;
+        //@ terminates;
     
 }
 
@@ -183,6 +186,7 @@ public class InterruptedException {
     public InterruptedException();
         //@ requires emp;
         //@ ensures emp;
+        //@ terminates;
     
 }
 
@@ -191,10 +195,12 @@ public class RuntimeException extends Exception {
     public RuntimeException();
         //@ requires true;
         //@ ensures true;
+        //@ terminates;
     
     public RuntimeException(Object innerException);
         //@ requires true;
         //@ ensures true;
+        //@ terminates;
     
 }
 
@@ -205,6 +211,11 @@ public class IllegalArgumentException extends RuntimeException {
 }
 
 public class NullPointerException extends RuntimeException {
+
+    public NullPointerException();
+        //@ requires true;
+        //@ ensures true;
+        
 }
 
 public class UnsupportedOperationException extends RuntimeException {

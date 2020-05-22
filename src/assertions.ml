@@ -44,6 +44,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     | IfAsn(_, _, a1, a2) -> (is_pure_spatial_assertion a1) && (is_pure_spatial_assertion a2)
     | EmpAsn _ -> true
     | ForallAsn _ -> true
+    | WMatchAsn _ -> true
     | _ -> false
   
   let rec assert_expr env e h env l msg url = 
@@ -314,7 +315,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         let (pmap, pred_symb) =
           try
           match try_assoc tn classmap1 with
-            Some (lcn, abstract, fin, methods, fds_opt, ctors, super, interfs, preds, pn, ilist) ->
+            Some (lcn, abstract, fin, methods, fds_opt, ctors, super, tparams, interfs, preds, pn, ilist) ->
             let (_, pmap, _, symb, _) = List.assoc g preds in (pmap, symb)
           | None ->
             match try_assoc tn classmap0 with
@@ -322,9 +323,9 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               let (_, pmap, _, symb, _) = List.assoc g cpreds in (pmap, symb)
             | None ->
               match try_assoc tn interfmap1 with
-                Some (li, fields, methods, preds, interfs, pn, ilist) -> let (_, pmap, family, symb) = List.assoc g preds in (pmap, symb)
+                Some (li, fields, methods, preds, interfs, pn, ilist, tparams) -> let (_, pmap, family, symb) = List.assoc g preds in (pmap, symb)
               | None ->
-                let InterfaceInfo (li, fields, methods, preds, interfs) = List.assoc tn interfmap0 in
+                let InterfaceInfo (li, fields, methods, preds, interfs, tparams) = List.assoc tn interfmap0 in
                 let (_, pmap, family, symb) = List.assoc g preds in
                 (pmap, symb)
           with Not_found -> assert_false h env l ("Definition of predicate " ^ g ^ " is missing from implementing class") None
@@ -963,6 +964,9 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           (fun chunk h coef value ghostenv env env' -> check_dummy_coefpat l coefpat coef; cont [chunk] h ghostenv env env' None)
     in
     let pred_asn l coefpat g is_global_predref targs pats0 pats =
+      if g#name = "junk" && is_global_predref then
+        cont h [] ghostenv env env' None
+      else
       let (g_symb, pats0, pats, types) =
         if is_global_predref then
            match try_assoc g#name predfammap with
@@ -975,7 +979,9 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             register_pred_ctor_application g_symb symbol symbol_term ctorargs inputParamCount;
             ((g_symb, false), [], pats, List.map snd ps2)
         else
-          let Some term = try_assoc (g#name) env in ((term, false), pats0, pats, g#domain)
+          match try_assoc g#name env with
+            None -> assert_false [] env l (Printf.sprintf "Unbound variable '%s'" g#name) None
+          | Some term -> ((term, false), pats0, pats, g#domain)
       in
       let targs = instantiate_types tpenv targs in
       let domain = instantiate_types tpenv types in
@@ -988,7 +994,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     let inst_call_pred l coefpat e_opt tn g index pats =
       let (pmap, pred_symb) =
         match try_assoc tn classmap1 with
-          Some (lcn, abstract, fin, methods, fds_opt, ctors, super, interfs, preds, pn, ilist) ->
+          Some (lcn, abstract, fin, methods, fds_opt, ctors, super, tparams, interfs, preds, pn, ilist) ->
           let (_, pmap, _, symb, _) = List.assoc g preds in (pmap, symb)
         | None ->
           match try_assoc tn classmap0 with
@@ -996,15 +1002,15 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             let (_, pmap, _, symb, _) = List.assoc g cpreds in (pmap, symb)
           | None ->
             match try_assoc tn interfmap1 with
-              Some (li, fields, methods, preds, interfs, pn, ilist) -> let (_, pmap, family, symb) = List.assoc g preds in (pmap, symb)
+              Some (li, fields, methods, preds, interfs, pn, ilist, tparams) -> let (_, pmap, family, symb) = List.assoc g preds in (pmap, symb)
             | None ->
-              let InterfaceInfo (li, fields, methods, preds, interfs) = List.assoc tn interfmap0 in
+              let InterfaceInfo (li, fields, methods, preds, interfs, tparams) = List.assoc tn interfmap0 in
               let (_, pmap, family, symb) = List.assoc g preds in
               (pmap, symb)
       in
       let target = match e_opt with None -> List.assoc "this" env | Some e -> ev e in
       let index = ev index in
-      let types = ObjType tn::ObjType "java.lang.Class"::List.map snd pmap in
+      let types = ObjType (tn, [])::ObjType ("java.lang.Class", [])::List.map snd pmap in
       let pats = TermPat target::TermPat index::srcpats pats in
       consume_chunk_core rules h ghostenv env env' l (pred_symb, true) [] coef coefpat (Some 2) pats types types $. fun chunk h coef ts size ghostenv env env' ->
       check_dummy_coefpat l coefpat coef;
@@ -1201,9 +1207,6 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         else
           []
       | WPredAsn(_, q, true, qtargs, qfns, qpats) ->
-        begin match try_assoc q#name xs with
-          Some _ -> []
-        | None ->
           begin match try_assoc q#name predfammap with
             Some (_, qtparams, _, qtps, qsymb, _, _) ->
             begin match q#inputParamCount with
@@ -1232,11 +1235,10 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               end
             end
           end
-        end
       | WInstPredAsn(l2, target_opt, static_type_name, static_type_finality, family_type_string, instance_pred_name, index, args) ->
         let (pmap, qsymb) =
           match try_assoc static_type_name classmap1 with
-            Some (lcn, abstract, fin, methods, fds_opt, ctors, super, interfs, preds, pn, ilist) ->
+            Some (lcn, abstract, fin, methods, fds_opt, ctors, super, tparams, interfs, preds, pn, ilist) ->
             let (_, pmap, _, symb, _) = List.assoc instance_pred_name preds in (pmap, symb)
           | None ->
             match try_assoc static_type_name classmap0 with
@@ -1244,9 +1246,9 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               let (_, pmap, _, symb, _) = List.assoc instance_pred_name cpreds in (pmap, symb)
             | None ->
               match try_assoc static_type_name interfmap1 with
-                Some (li, fields, methods, preds, interfs, pn, ilist) -> let (_, pmap, family, symb) = List.assoc instance_pred_name preds in (pmap, symb)
+                Some (li, fields, methods, preds, interfs, pn, ilist, tparams) -> let (_, pmap, family, symb) = List.assoc instance_pred_name preds in (pmap, symb)
               | None ->
-                let InterfaceInfo (li, fields, methods, preds, interfs) = List.assoc static_type_name interfmap0 in
+                let InterfaceInfo (li, fields, methods, preds, interfs, tparams) = List.assoc static_type_name interfmap0 in
                 let (_, pmap, family, symb) = List.assoc instance_pred_name preds in
                 (pmap, symb)
         in
@@ -1317,7 +1319,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
    
   let instance_predicate_contains_edges = 
     classmap1 |> flatmap 
-      (fun (cn, (l, abstract, fin, meths, fds, cmap, super, interfs, preds, pn, ilist)) ->
+      (fun (cn, (l, abstract, fin, meths, fds, cmap, super, tparams, interfs, preds, pn, ilist)) ->
         preds |> flatmap
           (fun (g, (l, pmap, family, psymb, wbody_opt)) ->
             match wbody_opt with None -> [] | Some wbody0 ->
@@ -1347,7 +1349,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                 [(outer_l, outer_symb, outer_nb_curried, outer_fun_sym, outer_is_inst_pred, outer_formal_targs, outer_actual_indices, outer_formal_args, outer_formal_input_args, outer_wbody, inner_frac_expr_opt, inner_target_opt, inner_formal_targs, inner_formal_indices, inner_input_exprs, conds)] ->
                 let extra_conditions: expr list = List.map2 (fun cn e2 -> 
                     if language = Java then 
-                      WOperation(dummy_loc, Eq, [ClassLit(dummy_loc, cn); e2], ObjType "java.lang.Class")
+                      WOperation(dummy_loc, Eq, [ClassLit(dummy_loc, cn); e2], ObjType ("java.lang.Class", []))
                     else 
                       WOperation(dummy_loc, Eq, [WVar(dummy_loc, cn, FuncName); e2], PtrType Void)
                 ) outer_actual_indices0 inner_formal_indices in

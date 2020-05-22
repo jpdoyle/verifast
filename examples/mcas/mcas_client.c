@@ -1,20 +1,8 @@
 #include <stdint.h>
 #include <stdlib.h>
+#include <threading.h>
 #include "mcas.h"
-
-typedef void thread_run(void *data);
-    //@ requires thread_run_pre(this)(data);
-    //@ ensures true;
-
-/*@
-
-predicate_family thread_run_pre(void *run)(void *data);
-
-@*/
-
-void thread_start(thread_run *run, void *data);
-    //@ requires is_thread_run(run) == true &*& thread_run_pre(run)(data);
-    //@ ensures true;
+//@ #include "bitops_ex.gh"
 
 struct interval {
     void *a;
@@ -77,24 +65,16 @@ predicate_ctor interval_ctor(int id, struct interval *interval)() =
     true == (((uintptr_t)a & 1) == 0) &*&
     mcas(id, interval_sep, interval_unsep, interval_info(interval), cons(pair(&interval->a, a), cons(pair(&interval->b, b), nil)));
 
-predicate_family_instance thread_run_pre(shift_interval)(struct interval *interval) =
+predicate_family_instance thread_run_data(shift_interval)(struct interval *interval) =
     [_]interval->id |-> ?id &*& [_]atomic_space(interval_ctor(id, interval)) &*& &interval->a != &interval->b;
 
 @*/
 
-/*@
-
-lemma void bitand_plus_4(void *x);
-    requires true == (((uintptr_t)x & 1) == 0) &*& true == (((uintptr_t)x & 2) == 0);
-    ensures true == (((uintptr_t)(x + 4) & 1) == 0) &*& true == (((uintptr_t)(x + 4) & 2) == 0);
-
-@*/
-
 void shift_interval(struct interval *interval) //@ : thread_run
-    //@ requires thread_run_pre(shift_interval)(interval);
+    //@ requires thread_run_data(shift_interval)(interval);
     //@ ensures true;
 {
-    //@ open thread_run_pre(shift_interval)(_);
+    //@ open thread_run_data(shift_interval)(_);
     //@ assert [_]interval->id |-> ?id;
     
     while (true)
@@ -303,6 +283,17 @@ void shift_interval(struct interval *interval) //@ : thread_run
     }
 }
 
+/*@
+
+lemma void interval_fields_disjoint(struct interval *i)
+    requires i->a |-> ?a &*& i->b |-> ?b;
+    ensures i->a |-> a &*& i->b |-> b &*& &i->a != &i->b;
+{
+    pointer_distinct(&i->a, &i->b);
+}
+
+@*/
+
 int main() //@ : main
     //@ requires true;
     //@ ensures true;
@@ -314,9 +305,11 @@ int main() //@ : main
     interval->b = 0;
     //@ int id = create_mcas(interval_sep, interval_unsep, interval_info(interval));
     //@ interval->id = id;
-    //@ assume(&interval->a != &interval->b);
-    //@ assume((0 & 1) == 0);
-    //@ assume((0 & 2) == 0);
+    //@ interval_fields_disjoint(interval);
+    //@ bitand_def(0, Zsign(false), 1, Zdigit(Zsign(false), true));
+    //@ assert ((0 & 1) == 0);
+    //@ bitand_def(0, Zsign(false), 2, Zdigit(Zdigit(Zsign(false), true), false));
+    //@ assert ((0 & 2) == 0);
     //@ close interval_values(0, 0);
     //@ open interval_a(_, _);
     //@ open interval_b(_, _);
@@ -326,9 +319,9 @@ int main() //@ : main
     //@ create_atomic_space(interval_ctor(id, interval));
     //@ leak atomic_space(_);
     //@ leak interval->id |-> id;
-    //@ close thread_run_pre(shift_interval)(interval);
+    //@ close thread_run_data(shift_interval)(interval);
     thread_start(shift_interval, interval);
-    //@ close thread_run_pre(shift_interval)(interval);
+    //@ close thread_run_data(shift_interval)(interval);
     shift_interval(interval);
     return 0;
 }

@@ -10,7 +10,7 @@ cd bin
 cd ..
 cd examples
   cd jayanti
-    verifast threading.o atomics.o jayanti.c client.c
+    verifast threading.o popl20_prophecies.o atomics.c jayanti.c client.c
   cd ..
   cd abstract_io
     mysh < io2.mysh
@@ -74,7 +74,7 @@ cd examples
     verifast -c ticket_lock.c
     verifast_both -c gotsmanlock.c
     verifast_both -c spinlock.c
-    verifast -prover z3v4.5 -c concurrentqueue.c
+    verifast -c concurrentqueue.c
     verifast -c -prover z3v4.5 concurrentstack.c
     verifast -c concurrentstackclient.c
     verifast -prover z3v4.5 -allow_assume threading.o atomics.o concurrentqueue.c concurrentqueue_client.c
@@ -217,6 +217,7 @@ cd examples
   verifast_both -c spouse-user.c
   verifast_both -disable_overflow_check -shared stack.c
   verifast_both -disable_overflow_check -shared stack_typeparam.c
+  verifast_both -c struct_assignment.c
   verifast_both struct_fields.c
   verifast_both swap.c
   verifast_both -c switch.c
@@ -250,7 +251,13 @@ cd examples
     cd channels
       verifast -prover redux -disable_overflow_check -c channels.jarsrc client.jarsrc
     cd ..
+    cd channels_raw
+      verifast -prover redux -disable_overflow_check -c channels.jarsrc client.jarsrc
+    cd ..
     cd chat
+      verifast_both -c -allow_assume chat.jarsrc
+    cd ..
+    cd chat_raw
       verifast_both -c -allow_assume chat.jarsrc
     cd ..
     cd chatbot
@@ -282,6 +289,7 @@ cd examples
       verifast -c -allow_assume -prover redux -provides "java_card_applet newmypackage.NewMyApplet 5,1,2,3,4,5,0,3,2,10,10" NewMyApplet/NewMyApplet.jarsrc
       verifast -c -allow_assume -prover redux -provides "java_card_applet mypackage.MyApplet 5,1,2,3,4,5,0,3,2,10,10" MyApplet-with-auto.java
     cd ..
+    verifast -c -disable_overflow_check GenericClass.java
     verifast_both -c -disable_overflow_check Account.java
     verifast_both -c -disable_overflow_check AbstractClasses.java
     verifast_both -c -disable_overflow_check ArrayList.java
@@ -409,6 +417,7 @@ cd tutorial_solutions
   verifast_both students.c
 cd ..
 cd tests
+  verifast -c -allow_should_fail div_mod_negative_dividend.c
   verifast -c -prover z3v4.5 prod_func_ptr_chunk_ftargs_convert_provertype.c
   verifast -c -allow_should_fail russell_predctors.c
   verifast -c -allow_should_fail any_russell.c
@@ -449,6 +458,7 @@ cd tests
     cd ..
   cd ..
   cd errors
+    verifast -c -allow_should_fail ghost_hiding_real.c
     verifast -c -allow_should_fail div_mod_by_zero.c
     verifast_both -c -allow_should_fail macro_in_macro_arg.c
     verifast -c -prover z3v4.5 int_lit_overflow.c
@@ -485,6 +495,14 @@ cd tests
     verifast_both -c -allow_should_fail test-ghost-break-from-real-loop.c
     cd context_free_pp
       verifast -c -allow_should_fail lib.c prog.c
+    cd ..
+  cd ..
+  cd java
+    cd generics
+    verifast -c BasicGenericClass.java
+    verifast -c GenericInheritance.java
+    verifast -c GenericType.java
+    verifast -c QualifiedGenericMethodCall.java
     cd ..
   cd ..
 cd ..

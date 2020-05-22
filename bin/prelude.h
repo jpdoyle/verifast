@@ -515,12 +515,14 @@ inductive vararg = vararg_int(int) | vararg_uint(unsigned int) | vararg_pointer(
 
 fixpoint bool func_lt(void *f, void *g);
 
-predicate call_perm_(void *f;);
-predicate call_below_perm_(void *f;);
+predicate call_perm_(int threadId, void *f;);
+predicate call_below_perm_(int threadId, void *f;);
 
 @*/
 
 /*@
+
+predicate junk(); // When consuming junk(), VeriFast will consume all chunks in the symbolic heap
 
 predicate module(int moduleId, bool initialState);
 predicate module_code(int moduleId;);
@@ -537,10 +539,15 @@ predicate argv(char **argv, int argc; list<list<char> > arguments) =
 
 typedef int main(int argc, char **argv);
     //@ requires 0 <= argc &*& [_]argv(argv, argc, ?arguments);
-    //@ ensures true;
+    //@ ensures junk();
 
 typedef int main_full/*@(int mainModule)@*/(int argc, char **argv);
-    //@ requires module(mainModule, true) &*& [_]argv(argv, argc, ?arguments);
+    //@ requires module(mainModule, true) &*& 0 <= argc &*& [_]argv(argv, argc, ?arguments);
+    //@ ensures junk();
+
+// Specify custom_main_spec on your main function to override the main_full default
+typedef int custom_main_spec(int argc, char **argv);
+    //@ requires false;
     //@ ensures true;
 
 // action permissions
