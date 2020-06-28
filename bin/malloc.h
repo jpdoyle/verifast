@@ -38,7 +38,7 @@ void *realloc(void *array, size_t newSize);
     /*@ ensures
         result == 0 ? malloc_block(array, size) &*& chars(array, size, cs)
         : malloc_block(result, newSize)
-        &*& chars(result, size, take(newSize,cs))
+        &*& chars(result, _, take(newSize,cs))
         &*& newSize <= size ? emp
             : chars(result + size, newSize-size, _);
     @*/
