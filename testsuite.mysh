@@ -9,6 +9,17 @@ cd bin
   cd ..
 cd ..
 cd examples
+  cd busywaiting
+    verifast -c bounded_fifo.c
+    cd clhlock
+      verifast -c clhlock.c
+    cd ..
+    cd ioliveness
+      verifast -c echo.c
+      verifast -c echo_live.c
+      verifast -c echo_live_mt.c
+    cd ..
+  cd ..
   cd jayanti
     verifast threading.o popl20_prophecies.o atomics.c jayanti.c client.c
   cd ..
@@ -439,6 +450,9 @@ cd tests
     mysh < runthistest.mysh
   cd ..
   cd preprocessor_if
+    mysh < run.mysh
+  cd ..
+  cd preprocessor_pragma
     mysh < run.mysh
   cd ..
   verifast -c nodecl_and_semicolon.c
