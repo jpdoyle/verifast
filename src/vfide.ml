@@ -367,6 +367,8 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
   let messageToolItem = GButton.tool_item ~expand:true () in
   let messageHBox = GPack.hbox ~packing:(messageToolItem#add) () in
   messageToolItem#set_border_width 3;
+  let statusIconYes = GButton.button ~show:false ~stock:`YES ~relief:`NONE ~packing:(messageHBox#pack) () in
+  let statusIconNo = GButton.button ~show:false ~stock:`NO ~relief:`NONE ~packing:(messageHBox#pack) () in
   let messageEntry = GEdit.entry ~show:false ~editable:false ~has_frame:false ~packing:(messageHBox#add) () in
   let messageEntryCheckDone = ref false in
   messageEntry#coerce#misc#modify_font_by_name !scaledTraceFont;
@@ -636,15 +638,16 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
     buffer#begin_not_undoable_action (); (* Disable the source view's undo manager since we handle undos ourselves. *)
     let apply_tag_enabled = ref false in (* To prevent tag copying when pasting from clipboard *)
     ignore $. buffer#connect#apply_tag (fun tag ~start ~stop -> if not !apply_tag_enabled then GtkSignal.emit_stop_by_name buffer#as_buffer "apply-tag");
-    let _ = buffer#create_tag ~name:"keyword" [`WEIGHT `BOLD; `FOREGROUND "Blue"] in
+    let _ = buffer#create_tag ~name:"keyword" [`WEIGHT `BOLD;
+    `FOREGROUND "DeepSkyBlue"] in
     let _ = buffer#create_tag ~name:"symbol" [`FOREGROUND "Gray"] in
-    let _ = buffer#create_tag ~name:"ghostRange" [`FOREGROUND "#772200"] in
+    let _ = buffer#create_tag ~name:"ghostRange" [`FOREGROUND "#BB6600"] in
     let _ = buffer#create_tag ~name:"ghostKeyword" [`WEIGHT `BOLD; `FOREGROUND "#DB9900"] in
     let _ = buffer#create_tag ~name:"ghostSymbol" [`WEIGHT `HEAVY; `FOREGROUND "#BB8888"] in
     let _ = buffer#create_tag ~name:"comment" [`FOREGROUND "#008000"] in
     let _ = buffer#create_tag ~name:"ghostRangeDelimiter" [`FOREGROUND "Gray"] in
-    let _ = buffer#create_tag ~name:"error" [`UNDERLINE `DOUBLE; `FOREGROUND "Red"] in
-    let _ = buffer#create_tag ~name:"currentLine" [`BACKGROUND "Yellow"] in
+    let _ = buffer#create_tag ~name:"error" [`UNDERLINE `DOUBLE; `FOREGROUND "firebrick"] in
+    let _ = buffer#create_tag ~name:"currentLine" [`BACKGROUND "silver"] in
     let _ = buffer#create_tag ~name:"currentCaller" [`BACKGROUND "#44FF44"] in
     let currentStepMark = buffer#create_mark (buffer#start_iter) in
     let currentCallerMark = buffer#create_mark (buffer#start_iter) in
@@ -673,8 +676,8 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
       updateBufferTitle tab;
       (* should be "no color" (i.e. theme's default), but the API does
          not seem to provide it. *)
-      messageEntry#coerce#misc#modify_base [`NORMAL, `NAME "gray"];
-      messageEntry#coerce#misc#modify_text [`NORMAL, `NAME "black"]
+      messageEntry#coerce#misc#modify_base [`NORMAL, `NAME "gray"]
+      (* messageEntry#coerce#misc#modify_text [`NORMAL, `NAME "black"] *)
     );
     ignore $. buffer#connect#insert_text (fun iter text ->
       if not !ignore_text_changes then
@@ -749,17 +752,23 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
   in
   let updateMessageEntry (success: bool) =
     (match !msg with
-      None -> messageEntry#coerce#misc#hide(); helpButton#coerce#misc#hide()
+      None -> messageEntry#coerce#misc#hide();
+              helpButton#coerce#misc#hide();
+              statusIconYes#coerce#misc#hide();
+              statusIconNo#coerce#misc#hide();
     | Some msg ->
-      let (backColor, textColor) = if success then ("green", "black") else ("red", "white") in
+      let (backColor, textColor) = if success then ("limegreen",
+      "black") else ("tomato", "white") in
+      (if success then statusIconYes else statusIconNo )#coerce#misc#show();
+      (if success then statusIconNo  else statusIconYes)#coerce#misc#hide();
       messageEntry#coerce#misc#show();
       messageEntry#set_text msg;
       if not !messageEntryCheckDone then begin
         messageEntryCheckDone := true;
         if messageEntry#misc#get_flag `NO_WINDOW then Printf.printf "warning: GtkEntry has flag GTK_NO_WINDOW; error message may not be visible in toolbar\n";
       end;
-      messageEntry#coerce#misc#modify_base [`NORMAL, `NAME backColor];
-      messageEntry#coerce#misc#modify_text [`NORMAL, `NAME textColor]);
+      messageEntry#coerce#misc#modify_base [`NORMAL, `NAME backColor]);
+      (* messageEntry#coerce#misc#modify_text [`NORMAL, `NAME textColor]); *)
     (match !url with
       None -> helpButton#coerce#misc#hide();
     | Some(_) -> helpButton#coerce#misc#show();
@@ -869,13 +878,13 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
     let collist = new GTree.column_list in
     let col_k = collist#add Gobject.Data.int in
     let col_text = collist#add Gobject.Data.string in
-    let col_foreground = collist#add Gobject.Data.string in
+    let col_foreground = collist#add (Gobject.Data.string_option) in
     let col_strikethrough = collist#add Gobject.Data.boolean in
     let store = GTree.list_store collist in
     let scrollWin = GBin.scrolled_window ~hpolicy:`AUTOMATIC ~vpolicy:`AUTOMATIC ~shadow_type:`IN () in
     let lb = GTree.view ~model:store ~packing:scrollWin#add () in
     lb#coerce#misc#modify_font_by_name !scaledTraceFont;
-    let col = GTree.view_column ~title:title ~renderer:(GTree.cell_renderer_text [], ["text", col_text; "foreground", col_foreground; "strikethrough", (Obj.magic (col_strikethrough: bool GTree.column): string GTree.column)]) () in (* Using Obj.magic to work around the fact that the type of GTree.view_column is more strict than necessary: it incorrectly requires that all columns be of the same type. *)
+    let col = GTree.view_column ~title:title ~renderer:(GTree.cell_renderer_text [], ["text", col_text; "foreground", (Obj.magic (col_foreground: string option GTree.column): string GTree.column); "strikethrough", (Obj.magic (col_strikethrough: bool GTree.column): string GTree.column)]) () in (* Using Obj.magic to work around the fact that the type of GTree.view_column is more strict than necessary: it incorrectly requires that all columns be of the same type. *)
     let _ = lb#append_column col in
     (scrollWin, lb, col_k, col_text, col_foreground, col_strikethrough, col, store)
   in
@@ -1152,9 +1161,9 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
             append_assoc_items srcEnvStore srcEnvKCol srcEnvCol1 srcEnvCol2 (strings_of_env caller_env)
           end
       end;
-      let unchangedRowColor = "#000000" in
-      let newRowColor = "#00C000" in
-      let deletedRowColor = "#FF0000" in
+      let unchangedRowColor = None in
+      let newRowColor = Some "#00C000" in
+      let deletedRowColor = Some "#FF0000" in
       let assRows =
         match prevStep with
           None -> List.map (fun s -> (s, unchangedRowColor, false)) ass

@@ -68,7 +68,7 @@ lemma void bitor_def(int x1, Z z1, int x2, Z z2);
     ensures (x1 | x2) == int_of_Z(Z_or(z1, z2));
 
 lemma void shiftleft_def(int x, nat n);
-    requires true;
+    requires x >= 0;
     ensures x << int_of_nat(n) == x * pow_nat(2, n);
 
 fixpoint Z Z_shiftright(Z z, nat n) {
@@ -82,12 +82,13 @@ fixpoint Z Z_shiftright(Z z, nat n) {
 }
 
 lemma void shiftright_def(int x, Z z, nat n);
-    requires x == int_of_Z(z);
+    requires x == int_of_Z(z) &*& x >= 0;
     ensures x >> int_of_nat(n) == int_of_Z(Z_shiftright(z, n));
 
 lemma void truncate_unsigned_def(int x, nat n);
     requires true;
-    ensures truncate_unsigned(x, int_of_nat(n)) == x % pow_nat(2, n);
+    ensures truncate_unsigned(x, int_of_nat(n))
+        ==  ((x % pow_nat(2, n)) + pow_nat(2, n)) % pow_nat(2, n);
 
 fixpoint Z Z_truncate_signed(Z z, nat n) { // n = number of bits, not including the sign bit!
     switch (n) {
