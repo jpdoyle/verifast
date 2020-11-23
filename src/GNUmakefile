@@ -464,6 +464,10 @@ endif
 	  shape_analysis/shape_analysis_backend.cmx \
 	  shape_analysis/changelog.cmx shape_analysis/shape_analysis_frontend.cmx \
 	  $(Z3ARGS) branchleft_png.cmx branchright_png.cmx vfconfig.cmx vfide.cmx
+ifeq ($(OS), Darwin)
+	DYLD_LIBRARY_PATH=../lib DYLD_PRINT_LIBRARIES=1 ../bin/vfide -verify_and_quit ../examples/busywaiting/ioliveness/echo_live_mt.c > vfide-libraries.log 2>&1
+	[[ -z "$$(grep /usr/local vfide-libraries.log)" ]]
+endif
 endif
 ifneq ($(OS), Windows_NT)
   ../bin/vfide$(DOTEXE): linux/libPerf_cobjs.a
@@ -683,7 +687,7 @@ ifeq ($(OS), Windows_NT)
 	cp $(GTK)/lib/gtk-2.0/2.10.0/engines/libwimp.dll lib/gtk-2.0/2.10.0/engines
 endif
 ifeq ($(OS), Linux)
-	cp /usr/lib/libgtksourceview-2.0.so.0.0.0 verifast-$(VFVERSION)/bin/libgtksourceview-2.0.so.0
+	cp /usr/lib/x86_64-linux-gnu/libgtksourceview-2.0.so.0.0.0 verifast-$(VFVERSION)/bin/libgtksourceview-2.0.so.0
 endif
 ifeq ($(OS), Darwin)
 	cd verifast-$(VFVERSION)/bin; mv vfide vfide-core
@@ -718,4 +722,8 @@ else
 	rm -Rf ../upload || true
 	mkdir ../upload || true
 	tar czf ../upload/verifast-nightly$(RELEASE_SUFFIX).tar.gz verifast-$(VFVERSION)
+endif
+ifdef GITHUB_ENV
+	echo "VFVERSION=$(VFVERSION)" >> $(GITHUB_ENV)
+	echo "VERIFAST_OS=$(OS)" >> $(GITHUB_ENV)
 endif

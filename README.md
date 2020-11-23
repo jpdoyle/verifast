@@ -1,3 +1,4 @@
+[![CI](https://github.com/verifast/verifast/workflows/CI/badge.svg)](https://github.com/verifast/verifast/actions)
 [![Build Status](https://travis-ci.org/verifast/verifast.svg?branch=master)](https://travis-ci.org/verifast/verifast) [![Build status](https://ci.appveyor.com/api/projects/status/1w7vchky3k6erltw?svg=true)](https://ci.appveyor.com/project/verifast/verifast) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.1182724.svg)](https://doi.org/10.5281/zenodo.1182724)
 
 VeriFast
@@ -17,8 +18,8 @@ Binaries
 Within an hour after each push to the master branch, binary packages become available at the following URLs:
 
 - [Windows](https://ci.appveyor.com/api/projects/verifast/verifast/artifacts/src/verifast-nightly.zip?branch=master)
-- [Linux/x64](http://82076e0e62875f063ae8-929808a701855dfb71539d0a4342d4be.r54.cf5.rackcdn.com/verifast-nightly.tar.gz)
-- [OS X](http://82076e0e62875f063ae8-929808a701855dfb71539d0a4342d4be.r54.cf5.rackcdn.com/verifast-nightly-osx.tar.gz)
+- [Linux/x64](https://storage.googleapis.com/verifast-nightlies/upload/verifast-nightly.tar.gz)
+- [macOS](https://storage.googleapis.com/verifast-nightlies/upload/verifast-nightly-osx.tar.gz)
 
 These "nightly" builds are very stable and are recommended. Still, named releases are available [here](https://github.com/verifast/verifast/releases). (An archive of older named releases is [here](https://people.cs.kuleuven.be/~bart.jacobs/verifast/releases/).)
 
