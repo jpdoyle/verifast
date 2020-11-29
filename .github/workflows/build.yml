@@ -70,16 +70,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Do not convert LF to CRLF on checkout
+        run: |
+          git config core.autocrlf false
+          git checkout .
+
       - name: Build setup
         run: ./setup-windows.bat
 
       - name: Build
-        run: /cygwin/bin/bash -lc "cd $(/cygwin/bin/cygpath -u ${env:GITHUB_WORKSPACE})/src && make nightly VERBOSE=yes GTK=/cygdrive/c/vfdeps"
+        run: c:/cygwin/bin/bash -lc 'cd $GITHUB_WORKSPACE/src && make nightly VERBOSE=yes GTK=/cygdrive/c/vfdeps'
 
       - uses: actions/upload-artifact@v2
         with:
           name: binary_package
-          path: verifast-nightly.zip
+          path: src/verifast-nightly.zip
 
       - name: Prepare for upload to Cloud Storage
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
@@ -87,6 +92,6 @@ jobs:
 
       - name: Upload to Cloud Storage
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
-        run: python3 upload.py
+        run: python upload.py
         env:
           GOOGLE_CLOUD_PLATFORM_CREDENTIALS: ${{ secrets.google_cloud_platform_credentials }}
