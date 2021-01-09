@@ -876,7 +876,7 @@ start:
         //@ open rdcss_read_operation_post(rdcssRop)(_);
         //@ leak rdcss_bs_membership_lemma(_)(_, _, _);
         if (((uintptr_t)r & 2) != 0) {
-            mcas_impl((struct cd *)((uintptr_t)r & ~(unsigned)2));
+            mcas_impl((struct cd *)((uintptr_t)r & ~(uintptr_t)2));
             goto start;
         }
         return r;
@@ -1364,7 +1364,6 @@ start:
                                     foreach_separate_ith(i, take(count, es));
                                     nth_take(i, count, es);
                                     open entry_attached(rcsList, cd)(_);
-                                    merge_fractions strong_ghost_assoc_list_member_handle(rcsList, a2, _);
                                 }
                                 strong_ghost_assoc_list_update(rcsList, a2, n2);
                                 split_fraction strong_ghost_assoc_list_member_handle(rcsList, a2, _);
@@ -1424,7 +1423,7 @@ start:
                 //@ open rdcss_operation_post(rop)(_);
             }
             if (((uintptr_t)r & 2) == 2) {
-                struct cd *cd1 = (void *)((uintptr_t)r & ~(unsigned)2);
+                struct cd *cd1 = (void *)((uintptr_t)r & ~(uintptr_t)2);
                 if (cd1 != cd) {
                     mcas_impl(cd1);
                     //@ entries_unseparate_ith(i, es);

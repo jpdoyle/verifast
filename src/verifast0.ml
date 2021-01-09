@@ -59,8 +59,14 @@ let rec string_of_type t =
   match t with
     Bool -> "bool"
   | Void -> "void"
-  | Int (Signed, k) -> "int" ^ string_of_int ((1 lsl k) * 8)
-  | Int (Unsigned, k) -> "uint" ^ string_of_int ((1 lsl k) * 8)
+  | Int (Signed, IntRank) -> "int"
+  | Int (Unsigned, IntRank) -> "unsigned int"
+  | Int (Signed, LongRank) -> "long"
+  | Int (Unsigned, LongRank) -> "unsigned long"
+  | Int (Signed, PtrRank) -> "intptr_t"
+  | Int (Unsigned, PtrRank) -> "uintptr_t"
+  | Int (Signed, LitRank k) -> "int" ^ string_of_int ((1 lsl k) * 8)
+  | Int (Unsigned, LitRank k) -> "uint" ^ string_of_int ((1 lsl k) * 8)
   | Float -> "float"
   | Double -> "double"
   | LongDouble -> "long double"
@@ -124,6 +130,8 @@ let string_of_context c =
   | Executing (h, env, l, s) -> "Heap: " ^ string_of_heap h ^ "\nEnv: " ^ string_of_env env ^ "\n" ^ string_of_loc l ^ ": " ^ s
   | PushSubcontext -> "Entering subcontext"
   | PopSubcontext -> "Leaving subcontext"
+  | Branching LeftBranch -> "Executing first branch"
+  | Branching RightBranch -> "Executing second branch"
 
 exception SymbolicExecutionError of string context list * loc * string * string option
 
@@ -148,7 +156,8 @@ type options = {
   option_use_java_frontend : bool;
   option_enforce_annotations : bool;
   option_allow_undeclared_struct_types: bool;
-  option_data_model: data_model
+  option_data_model: data_model option;
+  option_report_skipped_stmts: bool; (* Report statements in functions or methods that have no contract. *)
 } (* ?options *)
 
 (* Region: verify_program_core: the toplevel function *)

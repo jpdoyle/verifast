@@ -371,6 +371,8 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
   
   let is_transparent_stmt s =
     match s with
+    | Assert (_, False _) -> true
+    | LabelStmt _ -> true
     | PureStmt _ | NonpureStmt _ | BlockStmt _ -> true
     | _ -> false
 
@@ -385,7 +387,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         let fterm = List.assoc fn funcnameterms in
         if body <> None then
           ctxt#assert_term (ctxt#mk_eq (ctxt#mk_app func_rank [fterm]) (ctxt#mk_reallit !func_counter));
-        begin match body with None -> () | Some (ss, _) -> reportStmts ss end;
+        if report_skipped_stmts || match contract_opt with Some ((False _ | ExprAsn (_, False _)), _) -> false | _ -> true then begin match body with None -> () | Some (ss, _) -> reportStmts ss end;
         incr func_counter;
         let (rt, xmap, functype_opt, pre, pre_tenv, post) =
           check_func_header pn ilist [] [] [] l k tparams rt fn (Some fterm) xs nonghost_callers_only functype_opt contract_opt terminates body
@@ -1047,8 +1049,10 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     | TruncatingExpr (_, e) -> expr_mark_addr_taken e locals
     | AddressOf(_, (Var (_, x) | WVar (_, x, _))) -> mark_if_local locals x
     | Read(_, e, _) -> expr_mark_addr_taken e locals
+    | Select(_, e, f) -> expr_mark_addr_taken e locals
     | ArrayLengthExpr(_, e) -> expr_mark_addr_taken e locals
     | WRead(_, e, _, _, _, _, _, _) -> expr_mark_addr_taken e locals
+    | WSelect(_, e, _, _, _) -> expr_mark_addr_taken e locals
     | ReadArray(_, e1, e2) -> (expr_mark_addr_taken e1 locals); (expr_mark_addr_taken e2 locals)
     | WReadArray(_, e1, _, e2) -> (expr_mark_addr_taken e1 locals); (expr_mark_addr_taken e2 locals)
     | Deref(_, e) -> expr_mark_addr_taken e locals
@@ -1179,6 +1183,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     | Read(_, e, _) -> expr_address_taken e
     | ArrayLengthExpr(_, e) -> expr_address_taken e
     | WRead(_, e, _, _, _, _, _, _) -> expr_address_taken e
+    | WSelect(_, e, _, _, _) -> expr_address_taken e
     | ReadArray(_, e1, e2) -> (expr_address_taken e1) @ (expr_address_taken e2)
     | WReadArray(_, e1, _, e2) -> (expr_address_taken e1) @ (expr_address_taken e2)
     | Deref(_, e) -> (expr_address_taken e)
@@ -1261,10 +1266,10 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     *)
   let rec produce_c_object l coef addr tp eval_h init allowGhostFields producePaddingChunk h env cont =
     let produce_char_array_chunk h env addr length =
-      let elems = get_unique_var_symb "elems" (InductiveType ("list", [Int (Signed, 0)])) in
+      let elems = get_unique_var_symb "elems" (InductiveType ("list", [charType])) in
       begin fun cont ->
         if init = Default then
-          assume (mk_all_eq (Int (Signed, 0)) elems (ctxt#mk_intlit 0)) cont
+          assume (mk_all_eq charType elems (ctxt#mk_intlit 0)) cont
         else
           cont ()
       end $. fun () ->
@@ -1275,7 +1280,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       StaticArrayType (elemTp, elemCount) ->
       let elemSize = sizeof l elemTp in
       let arraySize = ctxt#mk_mul (ctxt#mk_intlit elemCount) elemSize in
-      ctxt#assert_term (ctxt#mk_and (ctxt#mk_le int_zero_term addr) (ctxt#mk_le (ctxt#mk_add addr arraySize) (max_unsigned_term ptr_rank)));
+      ctxt#assert_term (ctxt#mk_and (ctxt#mk_le int_zero_term addr) (ctxt#mk_le (ctxt#mk_add addr arraySize) max_uintptr_term));
       let produce_char_array_chunk h env addr elemCount =
         produce_char_array_chunk h env addr (ctxt#mk_mul (ctxt#mk_intlit elemCount) elemSize)
       in
@@ -1296,7 +1301,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           produce_char_array_chunk h env addr elemCount
       in
       begin match elemTp, init with
-        Int (Signed, 0), Expr (StringLit (_, s)) ->
+        Int (Signed, LitRank 0), Expr (StringLit (_, s)) ->
         produce_array_chunk h env addr (mk_char_list_of_c_string elemCount s) elemCount
       | (UnionType _ | StructType _ | StaticArrayType (_, _)), Expr (InitializerList (ll, es)) ->
         let rec iter h env i es =
@@ -1569,7 +1574,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               let arg =
                 let tp_promoted =
                   match tp with
-                    Int (_, _) -> integer_promotion tp
+                    Int (_, _) -> integer_promotion (expr_loc e) tp
                   | _ -> tp
                 in
                 match tp_promoted with
@@ -1763,6 +1768,11 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       * constant_value option option ref
       * ghostness
       * termnode (* field symbol *)
+    | ValueField of
+        loc
+      * lvalue
+      * symbol (* getter function *)
+      * symbol (* setter function *)
     | ArrayElement of
         loc
       * termnode (* array *)
@@ -1858,7 +1868,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       assume (ctxt#mk_eq (ctxt#mk_app arraylength_symbol [at]) length) $. fun () ->
       cont (Chunk ((array_slice_symb, true), [elem_tp], real_unit, [at; ctxt#mk_intlit 0; length; elems], None)::h) env at
     in
-    let lhs_to_lvalue h env lhs cont =
+    let rec lhs_to_lvalue h env lhs cont =
       match lhs with
         WVar (l, x, scope) -> cont h env (LValues.Var (l, x, scope))
       | WRead (l, w, fparent, fname, tp, fstatic, fvalue, fghost) ->
@@ -1870,6 +1880,18 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             eval_h h env w (fun h env target -> cont h env (Some target))
         end $. fun h env target ->
         cont h env (LValues.Field (l, target, fparent, fname, tp, fvalue, fghost, f_symb))
+      | WSelect (l, w, fparent, fname, tp) ->
+        let (_, _, getters, setters) = List.assoc fparent struct_accessor_map in
+        let getter = List.assoc fname getters in
+        let setter = List.assoc fname setters in
+        lhs_to_lvalue h env w $. fun h env w ->
+        cont h env (LValues.ValueField (l, w, getter, setter))
+      | WReadInductiveField (l, w, data_type_name, constructor_name, field_name, targs) ->
+        let (_, _, _, getters, setters, _, _, _) = List.assoc data_type_name inductivemap in
+        let getter = List.assoc field_name getters in
+        let setter = List.assoc field_name setters in
+        lhs_to_lvalue h env w $. fun h env w ->
+        cont h env (LValues.ValueField (l, w, getter, setter))
       | WReadArray (l, arr, elem_tp, i) ->
         eval_h h env arr $. fun h env arr ->
         eval_h h env i $. fun h env i ->
@@ -1879,7 +1901,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         cont h env (LValues.Deref (l, target, pointeeType))
       | _ -> static_error (expr_loc lhs) "Cannot assign to this expression." None
     in
-    let read_lvalue h env lvalue cont =
+    let rec read_lvalue h env lvalue cont =
       match lvalue with
         LValues.Var (l, x, scope) ->
         eval_h h env (WVar (l, x, scope)) cont
@@ -1892,6 +1914,9 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           consume_chunk rules h [] [] [] l (f_symb, true) [] real_unit dummypat (Some 0) [dummypat] $. fun chunk h _ [value] _ _ _ _ ->
           cont (chunk::h) env value
         end
+      | LValues.ValueField (l, w, getter, setter) ->
+        read_lvalue h env w $. fun h env x ->
+        cont h env (ctxt#mk_app getter [x])
       | LValues.ArrayElement (l, arr, elem_tp, i) when language = Java ->
         let pats = [TermPat arr; TermPat i; SrcPat DummyPat] in
         consume_chunk rules h [] [] [] l (array_element_symb(), true) [elem_tp] real_unit dummypat (Some 2) pats $. fun chunk h _ [_; _; value] _ _ _ _ ->
@@ -1919,6 +1944,10 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         let pats = List.map (fun t -> TermPat t) targets @ [dummypat] in
         consume_chunk rules h [] [] [] l (f_symb, true) [] real_unit real_unit_pat (Some 1) pats $. fun _ h _ _ _ _ _ _ ->
         cont (Chunk ((f_symb, true), [], real_unit, targets @ [value], None)::h) env
+      | LValues.ValueField (l, w, getter, setter) ->
+        read_lvalue h env w $. fun h env x ->
+        let x = ctxt#mk_app setter [x; value] in
+        write_lvalue h env w x cont
       | LValues.ArrayElement (l, arr, elem_tp, i) when language = Java ->
         has_heap_effects();
         if pure then static_error l "Cannot write in a pure context." None;
@@ -2021,7 +2050,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       end;
       eval_h h env w $. fun h env n ->
       let arraySize = ctxt#mk_mul n (sizeof ls elemTp) in
-      check_overflow lmul int_zero_term arraySize (max_unsigned_term ptr_rank) (fun l t -> assert_term t h env l);
+      check_overflow lmul int_zero_term arraySize max_uintptr_term (fun l t -> assert_term t h env l);
       let resultType = PtrType elemTp in
       let result = get_unique_var_symb_non_ghost (match xo with None -> "array" | Some x -> x) resultType in
       let cont h = cont h env result in
@@ -2035,9 +2064,9 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           let n, elemTp, arrayPredSymb, mallocBlockSymb =
             match try_pointee_pred_symb0 elemTp with
               Some (_, _, _, asym, _, mbsym) -> n, elemTp, asym, mbsym
-            | None -> arraySize, Int (Signed, 0), chars_pred_symb(), malloc_block_chars_pred_symb()
+            | None -> arraySize, charType, chars_pred_symb(), malloc_block_chars_pred_symb()
           in
-          assume (ctxt#mk_and (ctxt#mk_le int_zero_term result) (ctxt#mk_le (ctxt#mk_add result arraySize) (max_unsigned_term ptr_rank))) $. fun () ->
+          assume (ctxt#mk_and (ctxt#mk_le int_zero_term result) (ctxt#mk_le (ctxt#mk_add result arraySize) max_uintptr_term)) $. fun () ->
           let values = get_unique_var_symb "values" (list_type elemTp) in
           assume (ctxt#mk_eq (mk_length values) n) $. fun () ->
           let mallocBlockChunk = Chunk ((mallocBlockSymb, true), [], real_unit, [result; n], None) in
@@ -2231,8 +2260,8 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       | _ ->
         if unloadable then static_error l "The use of string literals as expressions in unloadable modules is not supported. Put the string literal in a named global array variable instead." None;
         let (_, _, _, _, string_symb, _, _) = List.assoc "string" predfammap in
-        let cs = get_unique_var_symb "stringLiteralChars" (InductiveType ("list", [Int (Signed, 0)])) in
-        let value = get_unique_var_symb "stringLiteral" (PtrType (Int (Signed, 0))) in
+        let cs = get_unique_var_symb "stringLiteralChars" (InductiveType ("list", [charType])) in
+        let value = get_unique_var_symb "stringLiteral" (PtrType charType) in
         let coef = get_dummy_frac_term () in
         assume (ctxt#mk_not (ctxt#mk_eq value (ctxt#mk_intlit 0))) $. fun () ->
         assume (ctxt#mk_eq (mk_char_list_of_c_string (String.length s) s) cs) $. fun () ->

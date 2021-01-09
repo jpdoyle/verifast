@@ -290,6 +290,12 @@ let imap (f: int -> 'a -> 'b) (xs: 'a list): 'b list =
   in
   imapi 0 xs
 
+let rec map3 f xs ys zs =
+  match xs, ys, zs with
+    [], [], [] -> []
+  | x::xs, y::ys, z::zs ->
+    f x y z::map3 f xs ys zs
+
 let list_remove_dups xs =
   let rec iter ys xs =
     match xs with
@@ -453,3 +459,30 @@ let rec add_uniques list addedItems =
   match addedItems with 
     hd::tl -> add_uniques (add_unique list hd) tl
   | [] -> list
+
+module InfiniteArray = struct
+  type 'a t = {default_value: 'a; mutable elems: 'a array}
+  let make default_value = {default_value; elems = Array.make 10 default_value}
+  let set a i v =
+    if Array.length a.elems <= i then begin
+      let newElems = Array.make (max (i + 10) (Array.length a.elems * 2)) a.default_value in
+      Array.blit a.elems 0 newElems 0 (Array.length a.elems);
+      a.elems <- newElems
+    end;
+    a.elems.(i) <- v
+  let get {default_value; elems} i =
+    if Array.length elems <= i then
+      default_value
+    else
+      elems.(i)
+end
+
+let memoize f =
+  let table = InfiniteArray.make None in
+  fun x ->
+    match InfiniteArray.get table x with
+      None ->
+      let v = f x in
+      InfiniteArray.set table x (Some v);
+      v
+    | Some v -> v

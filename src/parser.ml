@@ -28,7 +28,7 @@ let ghost_keywords = [
   "produce_lemma_function_pointer_chunk"; "duplicate_lemma_function_pointer_chunk"; "produce_function_pointer_chunk";
   "producing_box_predicate"; "producing_handle_predicate"; "producing_fresh_handle_predicate"; "box"; "handle"; "any"; "split_fraction"; "by"; "merge_fractions";
   "unloadable_module"; "decreases"; "forall_"; "import_module"; "require_module"; ".."; "extends"; "permbased";
-  "terminates"; "abstract_type"
+  "terminates"; "abstract_type"; "fixpoint_auto"
 ]
 
 let c_keywords = [
@@ -40,6 +40,7 @@ let c_keywords = [
   "CHAR_MIN"; "CHAR_MAX"; "UCHAR_MAX";
   "LLONG_MIN"; "LLONG_MAX"; "ULLONG_MAX";
   "LONG_MIN"; "LONG_MAX"; "ULONG_MAX";
+  "__minvalue"; "__maxvalue";
   "__int8"; "__int16"; "__int32"; "__int64"; "__int128";
   "inline"; "__inline"; "__inline__"; "__forceinline"; "_Noreturn";
   "__signed__"; "__always_inline"; "extern"
@@ -141,7 +142,7 @@ module Scala = struct
       begin
         match (tn, targs) with
           ("Unit", []) -> ManifestTypeExpr (l, Void)
-        | ("Int", []) -> ManifestTypeExpr (l, Int (Signed, 2))
+        | ("Int", []) -> ManifestTypeExpr (l, Int (Signed, LitRank 2))
         | ("Array", [t]) -> ArrayTypeExpr (l, t)
         | (_, []) -> IdentTypeExpr (l, None, tn)
         | _ -> raise (ParseException (l, "Type arguments are not supported."))
@@ -208,14 +209,18 @@ let is_typedef g = Hashtbl.mem typedefs g
 module type PARSER_ARGS = sig
   val language: language
   val enforce_annotations: bool
-  val data_model: data_model
+  val data_model: data_model option
 end
 
 module Parser(ParserArgs: PARSER_ARGS) = struct
 
 open ParserArgs
 
-let {int_rank; long_rank; ptr_rank} = data_model
+let int_rank, long_rank, ptr_rank =
+  match data_model with
+    Some {int_rank; long_rank; ptr_rank} -> LitRank int_rank, LitRank long_rank, LitRank ptr_rank
+  | None -> IntRank, LongRank, PtrRank
+
 let intType = Int (Signed, int_rank)
 let longType = Int (Signed, long_rank)
 
@@ -498,8 +503,10 @@ and
          end
     end
   >] -> register_typedef g; ds
-| [< '(_, Kwd "enum"); '(l, Ident n); elems = parse_enum_body; '(_, Kwd ";"); >] ->
-  [EnumDecl(l, n, elems)]
+| [< '(_, Kwd "enum"); '(l, Ident n); d = parser
+    [< elems = parse_enum_body; '(_, Kwd ";"); >] -> EnumDecl(l, n, elems)
+  | [< t = parse_type_suffix (EnumTypeExpr (l, Some n, None)); d = parse_func_rest Regular (Some t) Public >] -> d
+  >] -> check_function_for_contract d
 | [< '(_, Kwd "static"); _ = parse_ignore_inline; t = parse_return_type; d = parse_func_rest Regular t Private >] -> check_function_for_contract d
 | [< '(_, Kwd "extern"); t = parse_return_type; d = parse_func_rest Regular t Public >] -> check_function_for_contract d
 | [< '(_, Kwd "_Noreturn"); _ = parse_ignore_inline; t = parse_return_type; d = parse_func_rest Regular t Public >] ->
@@ -564,7 +571,6 @@ and
 and
   parse_pure_decl = parser
     [< '(l, Kwd "inductive"); '(li, Ident i); tparams = parse_type_params li; '(_, Kwd "="); cs = (parser [< cs = parse_ctors >] -> cs | [< cs = parse_ctors_suffix >] -> cs); '(_, Kwd ";") >] -> [Inductive (l, i, tparams, cs)]
-  | [< '(l, Kwd "fixpoint"); t = parse_return_type; d = parse_func_rest Fixpoint t Public>] -> [d]
   | [< '(l, Kwd "predicate"); result = parse_predicate_decl l Inductiveness_Inductive >] -> result
   | [< '(l, Kwd "copredicate"); result = parse_predicate_decl l Inductiveness_CoInductive >] -> result
   | [< '(l, Kwd "predicate_family"); '(_, Ident g); is = parse_paramlist; (ps, inputParamCount) = parse_pred_paramlist; '(_, Kwd ";") >]
@@ -585,6 +591,74 @@ and
   | [< '(l, Kwd "import_module"); '(_, Ident g); '(lx, Kwd ";") >] -> [ImportModuleDecl (l, g)]
   | [< '(l, Kwd "require_module"); '(_, Ident g); '(lx, Kwd ";") >] -> [RequireModuleDecl (l, g)]
   | [< '(l, Kwd "abstract_type"); '(_, Ident t); '(_, Kwd ";") >] -> [AbstractTypeDecl (l, t)]
+  | [< '(l, Kwd ("fixpoint"|"fixpoint_auto" as kwd)); rt = parse_return_type; '(lg, Ident g); tparams = parse_type_params_general;
+       ps = parse_paramlist;
+       decreases = begin parser
+         [< '(_, Kwd "decreases"); e = parse_expr; '(_, Kwd ";") >] -> Some e
+       | [< >] -> None
+       end;
+       body = begin parser
+         [< '(_, Kwd "{"); ss = parse_stmts; '(closeBraceLoc, Kwd "}") >] -> Some (ss, closeBraceLoc)
+       | [< '(_, Kwd ";") >] -> None
+       end
+    >] ->
+    let rec refers_to_g state e =
+      match e with
+        CallExpr (_, g', _, _, _, _) when g' = g -> true
+      | Var (_, g') when g' = g -> true
+      | _ -> expr_fold_open refers_to_g state e
+    in
+    begin match body with
+      Some ([ReturnStmt (_, Some bodyExpr)], _) when refers_to_g false bodyExpr ->
+      let rt =
+        match rt with
+          None -> raise (ParseException (l, "The return type of a fixpoint function must not be 'void'."))
+        | Some rt -> rt
+      in
+      let gdef = g ^ "__def" in
+      let iargs = g ^ "__args" in
+      let iargsType = ConstructedTypeExpr (l, iargs, List.map (fun x -> IdentTypeExpr (l, None, x)) tparams) in
+      let g_uncurry = g ^ "__uncurry" in
+      let gdef_curried = g ^ "__def_curried" in
+      let measure =
+        match decreases, bodyExpr with
+          Some e, _ -> e
+        | None, IfExpr (_, Operation (_, Eq, [Var (_, x); _]), _, _) when List.exists (fun (t, y) -> y = x) ps -> Var (l, x)
+        | _, _ -> raise (ParseException (l, "If the body of a fixpoint function is not of the form '{ switch (_) {_} }' or '{ return x == _ ? _ : _; }', a decreases clause must be specified"))
+      in
+      let gmeasure = g ^ "__measure" in
+      let call g args = CallExpr (l, g, [], [], List.map (fun e -> LitPat e) args, Static) in
+      [
+        Func (l, Fixpoint, tparams, Some rt, gdef, (PureFuncTypeExpr (l, List.map fst ps @ [rt]), g) :: ps, false, None, None, false, body, Static, Public);
+        Inductive (l, iargs, tparams, [Ctor (l, iargs, List.map (fun (t, x) -> (x, t)) ps)]);
+        Func (l, Fixpoint, tparams, Some rt, g_uncurry, (PureFuncTypeExpr (l, [iargsType; rt]), g) :: ps, false, None, None, false,
+          Some ([ReturnStmt (l, Some (call g [call iargs (List.map (fun (t, x) -> Var (l, x)) ps)]))], l), Static, Public);
+        Func (l, Fixpoint, tparams, Some rt, gdef_curried, [PureFuncTypeExpr (l, [iargsType; rt]), g; iargsType, "__args"], false, None, None, false,
+          Some ([SwitchStmt (l, Var (l, "__args"), [SwitchStmtClause (l, call iargs (List.map (fun (t, x) -> Var (l, x)) ps),
+            [ReturnStmt (l, Some (call gdef ([ExprCallExpr (l, Var (l, g_uncurry), [Var (l, g)])] @ List.map (fun (t, x) -> Var (l, x)) ps)))])])], l), Static, Public);
+        Func (l, Fixpoint, tparams, Some (ManifestTypeExpr (l, intType)), gmeasure, [iargsType, "__args"], false, None, None, false,
+          Some ([SwitchStmt (l, Var (l, "__args"), [SwitchStmtClause (l, call iargs (List.map (fun (t, x) -> Var (l, x)) ps),
+            [ReturnStmt (l, Some measure)])])], l), Static, Public);
+        Func (l, Fixpoint, tparams, Some rt, g, ps, false, None, None, false, Some ([ReturnStmt (l, Some (call "fix" [Var (l, gdef_curried); Var (l, gmeasure); call iargs (List.map (fun (t, x) -> Var (l, x)) ps)]))], l), Static, Public);
+        Func (l, Lemma (kwd = "fixpoint_auto", None), tparams, None, g ^ "_def", ps, false, None,
+          Some (Operation (l, Le, [IntLit (l, zero_big_int, true, false, NoLSuffix); measure]), Operation (l, Eq, [call g (List.map (fun (t, x) -> Var (l, x)) ps); bodyExpr])),
+          false,
+          Some ([
+            IfStmt (l, Operation (l, Neq, [call g (List.map (fun (t, x) -> Var (l, x)) ps); bodyExpr]), [
+              ExprStmt (call "fix_unfold" [Var (l, gdef_curried); Var (l, gmeasure); call iargs (List.map (fun (t, x) -> Var (l, x)) ps)]);
+              Open (l, None, "exists", [], [], [CtorPat (l, "pair", [CtorPat (l, "pair", [VarPat (l, "f1__"); VarPat (l, "f2__")]); CtorPat (l, iargs, List.map (fun (t, x) -> VarPat (l, x ^ "0")) ps)])], None);
+              Assert (l, (MatchAsn (l, call "pair" [ExprCallExpr (l, Var (l, g_uncurry), [Var (l, "f1_")]); ExprCallExpr (l, Var (l, g_uncurry), [Var (l, "f2_")])],
+                CtorPat (l, "pair", [VarPat (l, g ^ "__1"); VarPat (l, g ^ "__2")]))));
+              Assert (l, Operation (l, Eq, [
+                call gdef ([Var (l, g ^ "__1")] @ List.map (fun (t, x) -> Var (l, x ^ "0")) ps);
+                call gdef ([Var (l, g ^ "__2")] @ List.map (fun (t, x) -> Var (l, x ^ "0")) ps)]))
+            ], [])
+          ], l), Static, Public)
+      ]
+    | _ ->
+      if kwd = "fixpoint_auto" then raise (ParseException (l, "Keyword 'fixpoint_auto' does not make sense here because this type of fixpoint definition is always unfolded automatically"));
+      [Func (l, Fixpoint, tparams, rt, g, ps, false, None, None, false, body, Static, Public)]
+    end
 and
   parse_action_decls = parser
   [< ad = parse_action_decl; ads = parse_action_decls >] -> ad::ads
@@ -716,23 +790,23 @@ and
 and
   parse_integer_type_keyword = parser
   [< '(l, Kwd "int") >] -> (l, int_rank)
-| [< '(l, Kwd "__int8") >] -> (l, 0)
-| [< '(l, Kwd "__int16") >] -> (l, 1)
-| [< '(l, Kwd "__int32") >] -> (l, 2)
-| [< '(l, Kwd "__int64") >] -> (l, 3)
-| [< '(l, Kwd "__int128") >] -> (l, 4)
+| [< '(l, Kwd "__int8") >] -> (l, LitRank 0)
+| [< '(l, Kwd "__int16") >] -> (l, LitRank 1)
+| [< '(l, Kwd "__int32") >] -> (l, LitRank 2)
+| [< '(l, Kwd "__int64") >] -> (l, LitRank 3)
+| [< '(l, Kwd "__int128") >] -> (l, LitRank 4)
 and
   parse_integer_size_specifier = parser
-| [< '(_, Kwd "short") >] -> 1
+| [< '(_, Kwd "short") >] -> LitRank 1
 | [< '(_, Kwd "long");
      n = begin parser
-       [< '(_, Kwd "long") >] -> 3
+       [< '(_, Kwd "long") >] -> LitRank 3
      | [< >] -> long_rank
      end >] -> n
 | [< >] -> int_rank
 and
   parse_integer_type_rest = parser
-  [< '(_, Kwd "char") >] -> 0
+  [< '(_, Kwd "char") >] -> LitRank 0
 | [< (_, k) = parse_integer_type_keyword >] -> k
 | [< n = parse_integer_size_specifier; _ = opt (parser [< '(_, Kwd "int") >] -> ()) >] -> n
 and
@@ -752,12 +826,12 @@ and
 | [< (l, k) = parse_integer_type_keyword >] -> ManifestTypeExpr (l, Int (Signed, k))
 | [< '(l, Kwd "float") >] -> ManifestTypeExpr (l, Float)
 | [< '(l, Kwd "double") >] -> ManifestTypeExpr (l, Double)
-| [< '(l, Kwd "short") >] -> ManifestTypeExpr(l, Int (Signed, 1))
+| [< '(l, Kwd "short") >] -> ManifestTypeExpr(l, Int (Signed, LitRank 1))
 | [< '(l, Kwd "long");
      t = begin parser
        [< '(_, Kwd "int") >] -> ManifestTypeExpr (l, longType);
      | [< '(_, Kwd "double") >] -> ManifestTypeExpr (l, LongDouble);
-     | [< '(_, Kwd "long"); _ = opt (parser [< '(_, Kwd "int") >] -> ()) >] -> ManifestTypeExpr (l, Int (Signed, 3))
+     | [< '(_, Kwd "long"); _ = opt (parser [< '(_, Kwd "int") >] -> ()) >] -> ManifestTypeExpr (l, Int (Signed, LitRank 3))
      | [< >] -> ManifestTypeExpr (l, longType)
      end
    >] -> t
@@ -770,8 +844,8 @@ and
 | [< '(l, Kwd "bool") >] -> ManifestTypeExpr (l, Bool)
 | [< '(l, Kwd "boolean") >] -> ManifestTypeExpr (l, Bool)
 | [< '(l, Kwd "void") >] -> ManifestTypeExpr (l, Void)
-| [< '(l, Kwd "char") >] -> ManifestTypeExpr (l, match language with CLang -> Int (Signed, 0) | Java -> Int (Unsigned, 1))
-| [< '(l, Kwd "byte") >] -> ManifestTypeExpr (l, Int (Signed, 0))
+| [< '(l, Kwd "char") >] -> ManifestTypeExpr (l, match language with CLang -> Int (Signed, LitRank 0) | Java -> Int (Unsigned, LitRank 1))
+| [< '(l, Kwd "byte") >] -> ManifestTypeExpr (l, Int (Signed, LitRank 0))
 | [< '(l, Kwd "predicate");
      '(_, Kwd "(");
      ts = rep_comma parse_paramtype;
@@ -1256,7 +1330,7 @@ and
 | [< '(l, Kwd "false") >] -> False l
 | [< '(l, CharToken c) >] ->
   if Char.code c > 127 then raise (ParseException (l, "Non-ASCII character literals are not yet supported"));
-  let tp = match language with CLang -> Int (Signed, 0) | Java -> Int (Unsigned, 1) in
+  let tp = match language with CLang -> Int (Signed, LitRank 0) | Java -> Int (Unsigned, LitRank 1) in
   CastExpr (l, ManifestTypeExpr (l, tp), IntLit (l, big_int_of_int (Char.code c), true, false, NoLSuffix))
 | [< '(l, Kwd "null") >] -> Null l
 | [< '(l, Kwd "currentThread") >] -> Var (l, "currentThread")
@@ -1305,22 +1379,24 @@ and
 | [< '(l, Int (i, dec, usuffix, lsuffix)) >] -> IntLit (l, i, dec, usuffix, lsuffix)
 | [< '(l, RealToken i) >] -> RealLit (l, num_of_big_int i)
 | [< '(l, RationalToken n) >] -> RealLit (l, n)
-| [< '(l, Kwd "INT_MIN") >] -> IntLit (l, min_signed_big_int int_rank, true, false, NoLSuffix)
-| [< '(l, Kwd "INT_MAX") >] -> IntLit (l, max_signed_big_int int_rank, true, false, NoLSuffix)
-| [< '(l, Kwd "UINTPTR_MAX") >] -> IntLit (l, max_unsigned_big_int ptr_rank, true, true, NoLSuffix)
+| [< '(l, Kwd "INT_MIN") >] -> (match int_rank with LitRank k -> IntLit (l, min_signed_big_int k, true, false, NoLSuffix) | IntRank -> Operation (l, MinValue (Int (Signed, IntRank)), []))
+| [< '(l, Kwd "INT_MAX") >] -> (match int_rank with LitRank k -> IntLit (l, max_signed_big_int k, true, false, NoLSuffix) | IntRank -> Operation (l, MaxValue (Int (Signed, IntRank)), []))
+| [< '(l, Kwd "UINTPTR_MAX") >] -> (match ptr_rank with LitRank k -> IntLit (l, max_unsigned_big_int k, true, true, NoLSuffix) | PtrRank -> Operation (l, MaxValue (Int (Unsigned, PtrRank)), []))
 | [< '(l, Kwd "CHAR_MIN") >] -> IntLit (l, big_int_of_string "-128", true, false, NoLSuffix)
 | [< '(l, Kwd "CHAR_MAX") >] -> IntLit (l, big_int_of_string "127", true, false, NoLSuffix)
 | [< '(l, Kwd "UCHAR_MAX") >] -> IntLit (l, big_int_of_string "255", true, false, NoLSuffix)
 | [< '(l, Kwd "SHRT_MIN") >] -> IntLit (l, big_int_of_string "-32768", true, false, NoLSuffix)
 | [< '(l, Kwd "SHRT_MAX") >] -> IntLit (l, big_int_of_string "32767", true, false, NoLSuffix)
 | [< '(l, Kwd "USHRT_MAX") >] -> IntLit (l, big_int_of_string "65535", true, false, NoLSuffix)
-| [< '(l, Kwd "UINT_MAX") >] -> IntLit (l, max_unsigned_big_int int_rank, true, true, NoLSuffix)
-| [< '(l, Kwd "LONG_MIN") >] -> IntLit (l, min_signed_big_int long_rank, true, false, NoLSuffix)
-| [< '(l, Kwd "LONG_MAX") >] -> IntLit (l, max_signed_big_int long_rank, true, false, NoLSuffix)
-| [< '(l, Kwd "ULONG_MAX") >] -> IntLit (l, max_unsigned_big_int long_rank, true, true, NoLSuffix)
-| [< '(l, Kwd "LLONG_MIN") >] -> IntLit (l, big_int_of_string "-9223372036854775808", true, false, NoLSuffix)
-| [< '(l, Kwd "LLONG_MAX") >] -> IntLit (l, big_int_of_string "9223372036854775807", true, false, NoLSuffix)
-| [< '(l, Kwd "ULLONG_MAX") >] -> IntLit (l, big_int_of_string "18446744073709551615", true, true, NoLSuffix)
+| [< '(l, Kwd "LONG_MIN") >] -> (match long_rank with LitRank k -> IntLit (l, min_signed_big_int k, true, false, NoLSuffix) | LongRank -> Operation (l, MinValue (Int (Signed, LongRank)), []))
+| [< '(l, Kwd "LONG_MAX") >] -> (match long_rank with LitRank k -> IntLit (l, max_signed_big_int k, true, false, NoLSuffix) | LongRank -> Operation (l, MaxValue (Int (Signed, LongRank)), []))
+| [< '(l, Kwd "ULONG_MAX") >] -> (match long_rank with LitRank k -> IntLit (l, max_unsigned_big_int k, true, true, NoLSuffix) | LongRank -> Operation (l, MaxValue (Int (Unsigned, LongRank)), []))
+| [< '(l, Kwd "UINT_MAX") >] -> (match int_rank with LitRank k -> IntLit (l, max_unsigned_big_int k, true, true, NoLSuffix) | IntRank -> Operation (l, MaxValue (Int (Unsigned, IntRank)), []))
+| [< '(l, Kwd "LLONG_MIN") >] -> IntLit (l, big_int_of_string "-9223372036854775808", true, false, LLSuffix)
+| [< '(l, Kwd "LLONG_MAX") >] -> IntLit (l, big_int_of_string "9223372036854775807", true, false, LLSuffix)
+| [< '(l, Kwd "ULLONG_MAX") >] -> IntLit (l, big_int_of_string "18446744073709551615", true, true, LLSuffix)
+| [< '(l, Kwd "__minvalue"); '(_, Kwd "("); te = parse_type; '(_, Kwd ")") >] -> (match te with ManifestTypeExpr (_, t) -> Operation (l, MinValue t, []))
+| [< '(l, Kwd "__maxvalue"); '(_, Kwd "("); te = parse_type; '(_, Kwd ")") >] -> (match te with ManifestTypeExpr (_, t) -> Operation (l, MaxValue t, []))
 | [< '(l, String s); ss = rep (parser [< '(_, String s) >] -> s) >] -> 
      let s = String.concat "" (s::ss) in
      StringLit (l, s)
@@ -1391,7 +1467,7 @@ and
 and
   parse_expr_suffix_rest e0 = parser
   [< '(l, Kwd "->"); '(_, Ident f); e = parse_expr_suffix_rest (Read (l, e0, f)) >] -> e
-| [< '(l, Kwd ".") when language = CLang; '(_, Ident f); e = parse_expr_suffix_rest (Read (l, AddressOf(l, e0), f)) >] -> e
+| [< '(l, Kwd ".") when language = CLang; '(_, Ident f); e = parse_expr_suffix_rest (Select (l, e0, f)) >] -> e
 | [< '(l, Kwd ".");
      e = begin parser
        [< '(_, Ident f); e = parse_expr_suffix_rest (Read (l, e0, f)) >] -> e
@@ -1562,7 +1638,7 @@ let parse_import = parser
       (match i with Import(l, Real, pn,el) -> Import(l, Ghost, pn,el))
 
 let parse_package_decl enforceAnnotations = parser
-  [< (l,p) = parse_package; is=rep parse_import; ds=parse_decls Java data_model_java enforceAnnotations;>] -> PackageDecl(l,p,Import(dummy_loc,Real,"java.lang",None)::is, ds)
+  [< (l,p) = parse_package; is=rep parse_import; ds=parse_decls Java (Some data_model_java) enforceAnnotations;>] -> PackageDecl(l,p,Import(dummy_loc,Real,"java.lang",None)::is, ds)
 
 let noop_preprocessor stream =
   let next _ =
@@ -1577,7 +1653,7 @@ let noop_preprocessor stream =
 
 let parse_scala_file (path: string) (reportRange: range_kind -> loc0 -> bool -> unit): package =
   let lexer = make_lexer Scala.keywords ghost_keywords in
-  let (loc, ignore_eol, token_stream) = lexer path (readFile path) reportRange (fun x->()) in
+  let (loc, ignore_eol, token_stream) = lexer path (readFile path) reportRange (fun _ _ -> ()) in
   let parse_decls_eof = parser [< ds = rep Scala.parse_decl; '(_, Eof) >] -> PackageDecl(dummy_loc,"",[Import(dummy_loc,Real,"java.lang",None)],ds) in
   try
     parse_decls_eof (noop_preprocessor token_stream)
@@ -1610,7 +1686,7 @@ let parse_java_file_old (path: string) (reportRange: range_kind -> loc0 -> bool 
 
 type 'result parser_ = (loc * token) Stream.t -> 'result
 
-let rec parse_include_directives (verbose: int) (enforceAnnotations: bool) (dataModel: data_model): 
+let rec parse_include_directives (verbose: int) (enforceAnnotations: bool) (dataModel: data_model option): 
     ((loc * (include_kind * string * string) * string list * package list) list * string list) parser_ =
   let active_headers = ref [] in
   let test_include_cycle l totalPath =
@@ -1645,8 +1721,8 @@ let rec parse_include_directives (verbose: int) (enforceAnnotations: bool) (data
   in
   parse_include_directives_core []
 
-let parse_c_file (path: string) (reportRange: range_kind -> loc0 -> bool -> unit) (reportShouldFail: loc0 -> unit) (verbose: int) 
-            (include_paths: string list) (define_macros: string list) (enforceAnnotations: bool) (dataModel: data_model): ((loc * (include_kind * string * string) * string list * package list) list * package list) = (* ?parse_c_file *)
+let parse_c_file (path: string) (reportRange: range_kind -> loc0 -> bool -> unit) (reportShouldFail: string -> loc0 -> unit) (verbose: int) 
+            (include_paths: string list) (define_macros: string list) (enforceAnnotations: bool) (dataModel: data_model option): ((loc * (include_kind * string * string) * string list * package list) list * package list) = (* ?parse_c_file *)
   Stopwatch.start parsing_stopwatch;
   if verbose = -1 then Printf.printf "%10.6fs: >> parsing C file: %s \n" (Perf.time()) path;
   let result =
@@ -1669,8 +1745,8 @@ let parse_c_file (path: string) (reportRange: range_kind -> loc0 -> bool -> unit
   Stopwatch.stop parsing_stopwatch;
   result
 
-let parse_header_file (path: string) (reportRange: range_kind -> loc0 -> bool -> unit) (reportShouldFail: loc0 -> unit) (verbose: int) 
-         (include_paths: string list) (define_macros: string list) (enforceAnnotations: bool) (dataModel: data_model): ((loc * (include_kind * string * string) * string list * package list) list * package list) =
+let parse_header_file (path: string) (reportRange: range_kind -> loc0 -> bool -> unit) (reportShouldFail: string -> loc0 -> unit) (verbose: int) 
+         (include_paths: string list) (define_macros: string list) (enforceAnnotations: bool) (dataModel: data_model option): ((loc * (include_kind * string * string) * string list * package list) list * package list) =
   Stopwatch.start parsing_stopwatch;
   if verbose = -1 then Printf.printf "%10.6fs: >> parsing Header file: %s \n" (Perf.time()) path;
   let isGhostHeader = Filename.check_suffix path ".gh" in

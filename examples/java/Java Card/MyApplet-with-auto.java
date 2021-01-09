@@ -133,7 +133,7 @@ public final class MyApplet extends Applet {
     //@ predicate valid() = MyApplet_(this, _, _);
 
   private MyApplet(byte[] byaBuffer, short shOffset, byte byLength, byte byMaxNbRecord, byte byMaxSizeRecord)
-    //@ requires system() &*& 0 <= byMaxNbRecord &*& 6 <= byMaxSizeRecord &*& bya_FCI |-> ?fci &*& array_slice(fci, 0, 23, _) &*& fci.length == 23 &*& array_slice(byaBuffer, shOffset, byLength, _);
+    //@ requires system() &*& 0 <= byMaxNbRecord &*& 6 <= byMaxSizeRecord &*& bya_FCI |-> ?fci &*& array_slice(fci, 0, 23, _) &*& fci.length == 23 &*& array_slice(byaBuffer, shOffset, shOffset + byLength, _);
     //@ ensures true;
   {
     by_MaxNbRecord   = byMaxNbRecord;
@@ -164,7 +164,7 @@ public final class MyApplet extends Applet {
       system() &*& class_init_token(MyApplet.class) &*&
       byaBuffer != null &*&
       shOffset >= 0 &*&
-      array_slice(byaBuffer, shOffset, byLength, ?values) &*&
+      array_slice(byaBuffer, shOffset, shOffset + byLength, ?values) &*&
       length_value_record(values, 0, ?privilegesStart) &*&
       length_value_record(values, privilegesStart, ?paramsStart) &*&
       element(values, paramsStart + 1, ?paramsLength) &*&
@@ -242,6 +242,7 @@ public final class MyApplet extends Applet {
       case 0xcb:
         if (B_MODE_DEBUG)
         {
+          /*
           if(Util.getShort(byaApdu, (short)2) == (short)0x9f01)
           {
             byaApdu[4] = by_MaxNbRecord ;
@@ -249,6 +250,7 @@ public final class MyApplet extends Applet {
             oApdu.setOutgoingAndSend((short)2, (short)4) ;
             return;
           }
+          */
         }
       default:
         ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
@@ -455,8 +457,8 @@ public final class MyApplet extends Applet {
 
       ////@ close [1/2]MyApplet_(this, _, _); // auto
       JCSystem.beginTransaction();
-      ////@ open valid(); // auto
-      ////@ open MyApplet_(this, _, _); // auto
+      //@ open valid();
+      //@ open MyApplet_(this, _, _);
       if (by_NbRecords >= by_MaxNbRecord)
         ISOException.throwIt( ISO7816.SW_FILE_FULL );
       o_Records[by_NbRecords] = new byte[by_MaxSizeRecord + LEN_RECORD_LEN_BYTE];

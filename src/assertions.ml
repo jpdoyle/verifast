@@ -93,7 +93,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     | VarPat(_, x) -> cont (x :: ghostenv) env (List.assoc x env)
     | DummyPat -> let t = get_unique_var_symb_ "dummy" tp ghost in cont ghostenv env t
     | WCtorPat (l, i, targs, g, ts0, ts, pats) ->
-      let (_, inductive_tparams, ctormap, _, _) = List.assoc i inductivemap in
+      let (_, inductive_tparams, ctormap, _, _, _, _, _) = List.assoc i inductivemap in
       let (_, (_, _, _, _, (symb, _))) = List.assoc g ctormap in
       evalpats ghostenv env pats ts ts0 $. fun ghostenv env vs ->
       cont ghostenv env (prover_convert_term (ctxt#mk_app symb vs) tp0 tp)
@@ -367,7 +367,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         cont_with_post h ghostenv env post
       in
       let t = ev e in
-      let (_, tparams, ctormap, _, _) = List.assoc i inductivemap in
+      let (_, tparams, ctormap, _, _, _, _, _) = List.assoc i inductivemap in
       let rec iter cs =
         match cs with
           WSwitchAsnClause (lc, cn, pats, patsInfo, p)::cs ->
@@ -453,10 +453,19 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     | SrcPat DummyPat -> cont ghostenv env env'
     | SrcPat (WCtorPat (l, i, targs, g, ts0, ts, pats)) ->
       let t = prover_convert_term t tp tp0 in
-      let (_, inductive_tparams, ctormap, _, _) = List.assoc i inductivemap in
+      let (_, inductive_tparams, ctormap, _, _, _, _, _) = List.assoc i inductivemap in
       let cont () =
         let (_, (_, _, _, _, (symb, _))) = List.assoc g ctormap in
-        let vs = List.map2 (fun tp0 tp -> let v = get_unique_var_symb "value" tp in (v, prover_convert_term v tp tp0)) ts0 ts in
+        let vs = map3 begin fun tp0 tp pat ->
+            let x =
+              match pat with
+                VarPat (_, x) -> x
+              | _ -> "value"
+            in
+            let v = get_unique_var_symb x tp in
+            (v, prover_convert_term v tp tp0)
+          end ts0 ts pats
+        in
         let formula = ctxt#mk_eq t (ctxt#mk_app symb (List.map snd vs)) in
         assume formula $. fun () ->
         let inputParamCount = if isInputParam then max_int else 0 in
@@ -625,10 +634,10 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       match todo with
         [] -> None
       | Chunk ((g, true), [tp], coef, [a'; i'; v], b) :: rest
-          when g == array_element_symb() && definitely_equal a' a && definitely_equal i' i ->
+          when g == array_element_symb() && definitely_equal a' a && definitely_equal i' i && definitely_equal coef real_unit ->
         Some(seen @ ((Chunk ((g, true), [tp], coef, [a'; i'; new_value], b)) :: rest))
       | Chunk ((g, true), [tp], coef, [a'; istart; iend; vs], b) :: rest
-          when g == array_slice_symb() && definitely_equal a' a && ctxt#query (ctxt#mk_and (ctxt#mk_le istart i) (ctxt#mk_lt i iend)) ->
+          when g == array_slice_symb() && definitely_equal a' a && ctxt#query (ctxt#mk_and (ctxt#mk_le istart i) (ctxt#mk_lt i iend)) && definitely_equal coef real_unit ->
         let (_, _, _, _, update_symb) = List.assoc "update" purefuncmap in
         let converted_new_value = apply_conversion (provertype_of_type tp) ProverInductive new_value in
         let updated_vs = (mk_app update_symb [ctxt#mk_sub i istart; converted_new_value; vs]) in
@@ -900,7 +909,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
   
   (** [cont] is called as [cont chunk h coef ts size ghostenv env env']. See docs at consume_chunk_core. *)
   let consume_chunk rules h ghostenv env env' l g targs coef coefpat inputParamCount pats cont =
-    let tps = List.map (fun _ -> Int (Signed, 2)) pats in (* dummies, to indicate that no prover type conversions are needed *)
+    let tps = List.map (fun _ -> intType) pats in (* dummies, to indicate that no prover type conversions are needed *)
     consume_chunk_core rules h ghostenv env env' l g targs coef coefpat inputParamCount pats tps tps cont
   
   let srcpat pat = SrcPat pat
@@ -1063,7 +1072,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       in
       let env' = [] in
       let t = ev e in
-      let (_, tparams, ctormap, _, _) = List.assoc i inductivemap in
+      let (_, tparams, ctormap, _, _, _, _, _) = List.assoc i inductivemap in
       let rec iter cs =
         match cs with
           WSwitchAsnClause (lc, cn, pats, patsInfo, p)::cs ->
@@ -1871,6 +1880,9 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         if definitely_equal istart iend then (* create empty array by default *)
           cont (Some (Chunk ((array_slice_symb, true), [elem_tp], real_unit, [arr; istart; iend; mk_nil()], None)::h))
         else
+          if not (ctxt#query (ctxt#mk_le istart iend)) then
+            cont None
+          else
           extract_slice h
             begin fun coef' istart' iend' ->
               match iend' with
@@ -1993,6 +2005,9 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         if definitely_equal istart iend then (* create empty array by default *)
           cont (Some (Chunk ((array_slice_deep_symb, true), [elem_tp; a_tp; v_tp], real_unit, [arr; istart; iend; p; info; mk_nil(); mk_nil()], None)::h))
         else
+          if not (ctxt#query (ctxt#mk_le istart iend)) then
+            cont None
+          else
           extract_slice_deep h
             begin fun coef' istart' iend' ->
               match iend' with

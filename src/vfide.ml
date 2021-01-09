@@ -138,12 +138,13 @@ module TreeMetrics = struct
 end
 
 let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend enforceAnnotations allowUndeclaredStructTypes dataModel overflowCheck verifyAndQuit =
+  let dataModel = ref dataModel in
   let leftBranchPixbuf = Branchleft_png.pixbuf () in
   let rightBranchPixbuf = Branchright_png.pixbuf () in
   let ctxts_lifo = ref None in
   let msg = ref None in
   let url = ref None in
-  let appTitle = "VeriFast " ^ Vfversion.version ^ " IDE" in
+  let appTitle = "VeriFast" ^ string_of_string_opt Verifast.version ^ " IDE" in
   let root = GWindow.window
     ~title:appTitle ()
   in
@@ -264,6 +265,7 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
       (fun group -> group#add_action showLineNumbersAction);
       (fun group -> group#add_action showWhitespaceAction);
       (fun group -> group#add_action showRightMarginAction);
+      a "ShowExecutionTree" ~label:"Show _execution tree" ~accel:"<Ctrl>T";
       a "Verify" ~label:"_Verify";
       GAction.add_toggle_action "CheckOverflow" ~label:"Check arithmetic overflow" ~active:true ~callback:(fun toggleAction -> disableOverflowCheck := not toggleAction#get_active);
       GAction.add_toggle_action "UseJavaFrontend" ~label:"Use the Java frontend" ~active:(toggle_java_frontend javaFrontend; javaFrontend) ~callback:(fun toggleAction -> toggle_java_frontend toggleAction#get_active);
@@ -276,6 +278,7 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
       a "RunShapeAnalysis" ~label:"Run shape analysis on function" ~stock:`MEDIA_FORWARD ~accel:"F9" ~tooltip:"Run shape analysis on the function where the cursor is in";
       a "TopWindow" ~label:"Window(_Top)";
       a "BottomWindow" ~label:"Window(_Bottom)";
+      a "TargetArchitecture" ~label:"_Target architecture";
       a "Stub";
       a "Help" ~label:"_Help";
       a "About" ~stock:`ABOUT ~callback:(fun _ -> showBannerDialog ())
@@ -315,6 +318,8 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
           <menuitem action='ShowRightMargin' />
           <menuitem action='Find file (top window)' />
           <menuitem action='Find file (bottom window)' />
+          <separator />
+          <menuitem action='ShowExecutionTree' />
         </menu>
         <menu action='Verify'>
           <menuitem action='VerifyProgram' />
@@ -326,6 +331,10 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
           <menuitem action='UseJavaFrontend' />
           <menuitem action='SimplifyTerms' />
           <menuitem action='Include paths' />
+          <separator />
+          <menu action='TargetArchitecture'>
+            <menuitem action='Stub' />
+          </menu>
         </menu>
         <menu action='TopWindow'>
            <menuitem action='Stub' />
@@ -353,6 +362,7 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
   let redoAction = actionGroup#get_action "Redo" in
   let windowMenuItemTop = new GMenu.menu_item (GtkMenu.MenuItem.cast (ui#get_widget "/MenuBar/TopWindow")#as_widget) in
   let windowMenuItemBottom = new GMenu.menu_item (GtkMenu.MenuItem.cast (ui#get_widget "/MenuBar/BottomWindow")#as_widget) in
+  let targetMenuItem = new GMenu.menu_item (GtkMenu.MenuItem.cast (ui#get_widget "/MenuBar/Verify/TargetArchitecture")#as_widget) in
   let ignore_text_changes = ref false in
   let rootVbox = GPack.vbox ~packing:root#add () in
   root#resize
@@ -477,6 +487,23 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
       windowMenuItemTop#set_submenu (menu subNotebook);
       windowMenuItemBottom#set_submenu (menu textNotebook)
   in
+  let targetMenu = GMenu.menu () in
+  let targetMenuGroup = ref None in
+  let targetMenuItems =
+    data_models_ |> List.map begin fun (name, model) ->
+      let {int_rank; long_rank; ptr_rank} = model in
+      let item = GMenu.radio_menu_item ~active:(!dataModel = Some model) ?group:!targetMenuGroup ~label:(Printf.sprintf "sizeof(int, long, void *) = %d, %d, %d - %s" (1 lsl int_rank) (1 lsl long_rank) (1 lsl ptr_rank) name) ~packing:targetMenu#add () in
+      targetMenuGroup := Some item#group;
+      (Some model, item)
+    end
+  in
+  let targetMenuItems =
+    ignore (GMenu.separator_item ~packing:targetMenu#add ());
+    let item = GMenu.radio_menu_item ~active:(!dataModel = None) ?group:!targetMenuGroup ~label:"All of the above" ~packing:targetMenu#add () in
+    targetMenuItems @ [(None, item)]
+  in
+  targetMenuItem#set_submenu targetMenu;
+  targetMenuItems |> List.iter (fun (model, item) -> ignore (item#connect#activate ~callback:(fun () -> dataModel := model)));
   let updateWhenTabListChanges () =
     updateBufferMenu ();
     updateWindowTitle ()
@@ -565,7 +592,7 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
     let text = start#get_text ~stop:stop in
     let highlight keywords =
       let (loc, ignore_eol, tokenStream, in_comment, in_ghost_range) =
-        make_lexer_helper keywords ghost_keywords "<buffer>" text reportRange startIsInComment startIsInGhostRange false (fun _ -> ()) annotChar in
+        make_lexer_helper keywords ghost_keywords "<buffer>" text reportRange startIsInComment startIsInGhostRange false (fun _ _ -> ()) annotChar in
       Stream.iter (fun _ -> ()) tokenStream;
       (* Printf.printf "!in_comment: %B; !in_ghost_range: %B\n" !in_comment !in_ghost_range; flush stdout; *)
       if not (stop#is_end) && (!in_comment, !in_ghost_range) <> (stopIsInComment, stopIsInGhostRange) then
@@ -934,6 +961,13 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
   ignore $. (actionGroup#get_action "TextLarger")#connect#activate (fun () -> setFontScalePower (!fontScalePower + 1));
   ignore $. (actionGroup#get_action "TextSmaller")#connect#activate (fun () -> setFontScalePower (!fontScalePower - 1));
   ignore $. (actionGroup#get_action "TextSizeDefault")#connect#activate (fun () -> setFontScalePower 0);
+  let showExecutionTree () =
+    if treeSeparator#max_position - treeSeparator#position < 10 then
+      treeSeparator#set_position (treeSeparator#max_position * 85 / 100)
+    else
+      treeSeparator#set_position treeSeparator#max_position
+  in
+  ignore $. (actionGroup#get_action "ShowExecutionTree")#connect#activate showExecutionTree;
   let get_tab_for_path path0 =
     (* This function is called only at a time when no buffers are modified. *)
     let rec iter k tabs =
@@ -1487,7 +1521,7 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
                 option_use_java_frontend = !useJavaFrontend;
                 option_enforce_annotations = enforceAnnotations;
                 option_allow_undeclared_struct_types = allowUndeclaredStructTypes;
-                option_data_model = dataModel;
+                option_data_model = !dataModel;
                 option_allow_should_fail = true;
                 option_emit_manifest = false;
                 option_check_manifest = false;
@@ -1501,6 +1535,7 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
                 option_define_macros = !define_macros;
                 option_safe_mode = false;
                 option_header_whitelist = [];
+                option_report_skipped_stmts = false;
               }
               in
               let reportExecutionForest =
@@ -1527,7 +1562,12 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
                 if path' == path then
                   stmtExecCounts.(line - 1) <- stmtExecCounts.(line - 1) + 1
               in
-              let stats = verify_program prover options path {reportRange; reportUseSite; reportStmt; reportStmtExec; reportExecutionForest} breakpoint targetPath in
+              let reportDirective directive loc =
+                match directive with
+                  "allow_dead_code" -> true
+                | _ -> false
+              in
+              let stats = verify_program prover options path {reportRange; reportUseSite; reportStmt; reportStmtExec; reportExecutionForest; reportDirective} breakpoint targetPath in
               begin
                 let _, tab = get_tab_for_path path in
                 let column = tab#stmtExecCountsColumn in
@@ -1578,7 +1618,7 @@ let show_ide initialPath prover codeFont traceFont runtime layout javaFrontend e
               end
             | e ->
               prerr_endline ("VeriFast internal error: \n" ^ Printexc.to_string e ^ "\n");
-              Printexc_proxy.print_backtrace stderr;
+              Printexc.print_backtrace stderr;
               flush stderr;
               GToolbox.message_box "VeriFast IDE" "Verification failed due to an internal error. See the console window for details."
             end;
@@ -1902,7 +1942,7 @@ let () =
   let enforceAnnotations = ref false in
   let allowUndeclaredStructTypes = ref false in
   let overflow_check = ref true in
-  let data_model = ref data_model_32bit in
+  let data_model = ref None in
   let verify_and_quit = ref false in
   let rec iter args =
     match args with
@@ -1922,7 +1962,7 @@ let () =
     | "-javac"::args -> javaFrontend := true; iter args
     | "-enforce_annotations"::args -> enforceAnnotations := true; iter args
     | "-allow_undeclared_struct_types"::args -> allowUndeclaredStructTypes := true; iter args
-    | "-target"::target::args -> data_model := data_model_of_string target; iter args
+    | "-target"::target::args -> data_model := Some (data_model_of_string target); iter args
     | "-disable_overflow_check"::args -> overflow_check := false; iter args
     | "-verify_and_quit"::args -> verify_and_quit := true; iter args
     | arg::args when not (startswith arg "-") -> path := Some arg; iter args

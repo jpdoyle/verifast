@@ -156,7 +156,7 @@ public final class NewMyApplet extends Applet {
     //@ predicate valid() = MyApplet_(this, _, _);
 
   private NewMyApplet(byte[] byaBuffer, short shOffset, byte byLength, byte byMaxNbRecord, byte byMaxSizeRecord)
-    //@ requires system() &*& 0 <= byMaxNbRecord &*& 6 <= byMaxSizeRecord &*& Points |-> _ &*& bya_FCI |-> ?fci &*& array_slice(fci, 0, 23, _) &*& fci.length == 23 &*& array_slice(byaBuffer, shOffset, byLength, _);
+    //@ requires system() &*& 0 <= byMaxNbRecord &*& 6 <= byMaxSizeRecord &*& Points |-> _ &*& bya_FCI |-> ?fci &*& array_slice(fci, 0, 23, _) &*& fci.length == 23 &*& array_slice(byaBuffer, shOffset, shOffset + byLength, _);
     //@ ensures true;
   {
 	NewMyAppletPointsObject = new NewMyAppletPoints();
@@ -190,7 +190,7 @@ public final class NewMyApplet extends Applet {
       system() &*& class_init_token(NewMyApplet.class) &*&
       byaBuffer != null &*&
       shOffset >= 0 &*&
-      array_slice(byaBuffer, shOffset, byLength, ?values) &*&
+      array_slice(byaBuffer, shOffset, shOffset + byLength, ?values) &*&
       length_value_record(values, 0, ?privilegesStart) &*&
       length_value_record(values, privilegesStart, ?paramsStart) &*&
       element(values, paramsStart + 1, ?paramsLength) &*&
@@ -268,6 +268,7 @@ public final class NewMyApplet extends Applet {
       case 0xcb:
         if (B_MODE_DEBUG)
         {
+          /*
           if(Util.getShort(byaApdu, (short)2) == (short)0x9f01)
           {
             byaApdu[4] = by_MaxNbRecord ;
@@ -275,6 +276,7 @@ public final class NewMyApplet extends Applet {
             oApdu.setOutgoingAndSend((short)2, (short)4) ;
             return;
           }
+          */
         }
       case INS_Debit:
 			askForPayment();
@@ -419,7 +421,7 @@ public final class NewMyApplet extends Applet {
     default :
       ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
     }
-    return -1;
+    return -1; //~allow_dead_code
   }
 
   private void processAppendRecord(APDU oApdu)
@@ -776,7 +778,7 @@ public final class NewMyApplet extends Applet {
           else 
 			    ISOException.throwIt(ISO7816.SW_WRONG_DATA);
 		
-		return null;
+		return null; //~allow_dead_code
 	}
 }
 

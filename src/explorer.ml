@@ -31,11 +31,11 @@ let _ =
   in
 
   let shouldFailLocs: loc0 list ref = ref [] in
-  let reportShouldFail l = shouldFailLocs := l::!shouldFailLocs in
+  let reportShouldFail directive l = shouldFailLocs := l::!shouldFailLocs in
 
   (* Custom parser *)
-  let parse_c_file_custom (path: string) (reportRange: range_kind -> loc0 -> bool -> unit) (reportShouldFail: loc0 -> unit) (verbose: int) 
-        (include_paths: string list) (define_macros: string list) (enforceAnnotations: bool) (dataModel: data_model) (pattern_str: string): ((loc * (include_kind * string * string) * string list * package list) list * package list) = (* ?parse_c_file_custom *)
+  let parse_c_file_custom (path: string) (reportRange: range_kind -> loc0 -> bool -> unit) (reportShouldFail: string -> loc0 -> unit) (verbose: int) 
+        (include_paths: string list) (define_macros: string list) (enforceAnnotations: bool) (dataModel: data_model option) (pattern_str: string): ((loc * (include_kind * string * string) * string list * package list) list * package list) = (* ?parse_c_file_custom *)
     let result =
       let make_lexer path include_paths ~inGhostRange =
         let text = 
@@ -87,7 +87,7 @@ let _ =
         if (Filename.check_suffix filepath ".gh" || Filename.check_suffix filepath ".h") then
               let packages = 
                 try
-                  let (_, packages_tmp) = parse_header_file filepath reportRange reportShouldFail 0 include_paths define_macros false data_model_32bit in
+                  let (_, packages_tmp) = parse_header_file filepath reportRange reportShouldFail 0 include_paths define_macros false (Some data_model_32bit) in
                   packages_tmp
                 with
                   Lexer.ParseException(_, msg) -> let _ = fail_msg filepath msg in []
@@ -99,7 +99,7 @@ let _ =
         else if (Filename.check_suffix filepath ".c") then
             let packages = 
                 try
-                  let (_, packages_tmp) = parse_c_file filepath reportRange reportShouldFail 0 include_paths define_macros false data_model_32bit in
+                  let (_, packages_tmp) = parse_c_file filepath reportRange reportShouldFail 0 include_paths define_macros false (Some data_model_32bit) in
                   packages_tmp
                 with
                   Lexer.ParseException(_, msg) -> let _ = fail_msg filepath msg in []
@@ -137,7 +137,7 @@ let _ =
   
   (* Attempts to convert a textual pattern into an AST expression. Returns an empty string on failure. *)
   let pattern_str_to_expr (pattern_str: string) : expr =
-    let (_, package_list) = parse_c_file_custom "dummy.c" reportRange reportShouldFail 0 [] [] true data_model_32bit pattern_str in
+    let (_, package_list) = parse_c_file_custom "dummy.c" reportRange reportShouldFail 0 [] [] true (Some data_model_32bit) pattern_str in
     match package_list with
       | pack_head :: _ -> 
         begin
@@ -235,14 +235,26 @@ let _ =
           "short"
         else if (rank = 2) then
           "int"
-        else
+        else if (rank = 3) then
           "long"
+        else if (rank = 4) then
+          "__int128"
+        else
+          assert false
+      in
+
+      let string_of_rank r =
+        match r with
+          LitRank k -> string_of_integer_rank k
+        | IntRank -> "int"
+        | LongRank -> "long"
+        | PtrRank -> "intptr_t"
       in
 
       match type_ with
         | Bool -> "bool"
         | Void -> "void"
-        | Int(sign, rank) -> (match sign with Unsigned -> "unsigned " | _ -> "") ^ string_of_integer_rank rank
+        | Int(sign, rank) -> (match sign with Unsigned -> "unsigned " | _ -> "") ^ string_of_rank rank
         | RealType -> "real"
         | Float -> "float"
         | Double -> "double"
@@ -303,6 +315,7 @@ let _ =
       | RealLit(_, real) -> Num.string_of_num real
       | StringLit(_, str) -> "\"" ^ str ^ "\""
       | Read(_, expr_in, str) -> string_of_expr expr_in ^ "." ^ str
+      | Select(_, expr_in, str) -> string_of_expr expr_in ^ "." ^ str
       | ArrayLengthExpr(_, expr_in) -> "ArrayLength " ^ string_of_expr expr_in ^ ")"
       | ReadArray(_, array_expr, index_expr) -> string_of_expr array_expr ^ "[" ^ string_of_expr index_expr ^ "]" 
       | Deref(_, expr_in) -> "*" ^ string_of_expr expr_in
@@ -572,11 +585,14 @@ let _ =
                     | StringLit(_, pattern_str) when str = pattern_str -> true, []
                     | _ -> false, []
                 end
-              | Read(_, expr_in, str) ->
+              | Read(_, expr_in, str)
+              | Select(_, expr_in, str) ->
                 begin
                   let pattern_inside = if (exactMacthOnly) then false, [] else check_expr_for_pattern expr_in pattern false in
                   match pattern with
-                    | Read(_, pattern_expr_in, pattern_str) when str = pattern_str -> combine_or pattern_inside (check_expr_for_pattern expr_in pattern_expr_in true)
+                    | Read(_, pattern_expr_in, pattern_str)
+                    | Select(_, pattern_expr_in, pattern_str)
+                      when str = pattern_str -> combine_or pattern_inside (check_expr_for_pattern expr_in pattern_expr_in true)
                     | _ -> pattern_inside
                 end
               | ArrayLengthExpr(_, expr_in) -> 

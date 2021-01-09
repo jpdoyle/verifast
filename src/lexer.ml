@@ -311,6 +311,21 @@ let big_int_of_octal_string s =
 
 type decl_kind =
   | DeclKind_InductiveType
+  | DeclKind_Struct
+  | DeclKind_Union
+  | DeclKind_FuncType
+  | DeclKind_Class
+  | DeclKind_Interface
+  | DeclKind_AbstractType
+  | DeclKind_Typedef
+  | DeclKind_InductiveCtor
+  | DeclKind_Predicate
+  | DeclKind_RegularFunction
+  | DeclKind_LemmaFunction
+  | DeclKind_FixpointFunction
+  | DeclKind_PureFunction
+  | DeclKind_GlobalVar
+  | DeclKind_Method
 
 type range_kind = (* ?range_kind *)
     KeywordRange
@@ -747,16 +762,29 @@ let make_lexer_core keywords ghostKeywords startpos text reportRange inComment i
           ghost_range_start := Some !token_srcpos;
           reportRange GhostRangeDelimiter (current_loc()) false;
           Some (Kwd "/*@")
-        | '~' -> text_junk (); reportShouldFail (current_loc()); multiline_comment ()
+        | '~' -> text_junk (); directive (); multiline_comment ()
         | _ -> multiline_comment ()
       )
     | '=' ->
       text_junk();
       Some (keyword_or_error "/=")
     | _ -> Some (keyword_or_error "/")
+  and directive () =
+    let directive = Buffer.create 20 in
+    let loc = current_loc () in
+    let rec iter () =
+      match text_peek () with
+        'a'..'z'|'_' as c ->
+        text_junk ();
+        Buffer.add_char directive c;
+        iter ()
+      | _ ->
+        reportShouldFail (Buffer.contents directive) loc
+    in
+    iter ()
   and single_line_comment () =
     match text_peek () with
-      '~' -> text_junk (); reportShouldFail (current_loc()); single_line_comment_rest ()
+      '~' -> text_junk (); directive (); single_line_comment_rest ()
     | _ -> single_line_comment_rest ()
   and single_line_comment_rest () =
     match text_peek () with
@@ -879,9 +907,9 @@ class tentative_lexer (lloc:unit -> loc0) (lstream:(loc0 * token) Stream.t) : t_
 
   end
 
+let construct_not_supported () = raise (Stream.Error "This construct is not supported in preprocessor conditions")
 (* Mini parser which is a subset of Parser.parse_decls_core *)
 let parse_operators dataModel =
-let {int_rank; long_rank; ptr_rank} = dataModel in
 let rec
   parse_operators stream = parse_disj_expr stream
 and
@@ -926,22 +954,22 @@ and
 | [< '(l, Kwd "-"); '(l, Int (n, dec, usuffix, lsuffix)) >] -> IntLit (l, minus_big_int n, dec, usuffix, lsuffix)
 | [< '(l, Kwd "("); e0 = parse_operators; '(_, Kwd ")"); e = parse_operators_rest e0 >] -> e
 | [< '(l, Kwd "!"); e = parse_expr_suffix >] -> Operation(l, Not, [e])
-| [< '(l, Kwd "INT_MIN") >] -> IntLit (l, min_signed_big_int int_rank, true, false, NoLSuffix)
-| [< '(l, Kwd "INT_MAX") >] -> IntLit (l, max_signed_big_int int_rank, true, false, NoLSuffix)
-| [< '(l, Kwd "UINTPTR_MAX") >] -> IntLit (l, max_unsigned_big_int ptr_rank, true, true, NoLSuffix)
+| [< '(l, Kwd "INT_MIN") >] -> (match dataModel with Some {int_rank} -> IntLit (l, min_signed_big_int int_rank, true, false, NoLSuffix) | _ -> construct_not_supported ())
+| [< '(l, Kwd "INT_MAX") >] -> (match dataModel with Some {int_rank} -> IntLit (l, max_signed_big_int int_rank, true, false, NoLSuffix) | _ -> construct_not_supported ())
+| [< '(l, Kwd "UINTPTR_MAX") >] -> (match dataModel with Some {ptr_rank} -> IntLit (l, max_unsigned_big_int ptr_rank, true, true, NoLSuffix) | _ -> construct_not_supported ())
 | [< '(l, Kwd "CHAR_MIN") >] -> IntLit (l, big_int_of_string "-128", true, false, NoLSuffix)
 | [< '(l, Kwd "CHAR_MAX") >] -> IntLit (l, big_int_of_string "127", true, false, NoLSuffix)
 | [< '(l, Kwd "UCHAR_MAX") >] -> IntLit (l, big_int_of_string "255", true, false, NoLSuffix)
 | [< '(l, Kwd "SHRT_MIN") >] -> IntLit (l, big_int_of_string "-32768", true, false, NoLSuffix)
 | [< '(l, Kwd "SHRT_MAX") >] -> IntLit (l, big_int_of_string "32767", true, false, NoLSuffix)
 | [< '(l, Kwd "USHRT_MAX") >] -> IntLit (l, big_int_of_string "65535", true, false, NoLSuffix)
-| [< '(l, Kwd "UINT_MAX") >] -> IntLit (l, max_unsigned_big_int int_rank, true, true, NoLSuffix)
+| [< '(l, Kwd "UINT_MAX") >] -> (match dataModel with Some {int_rank} -> IntLit (l, max_unsigned_big_int int_rank, true, true, NoLSuffix) | _ -> construct_not_supported ())
 | [< '(l, Kwd "LLONG_MIN") >] -> IntLit (l, big_int_of_string "-9223372036854775808", true, false, NoLSuffix)
 | [< '(l, Kwd "LLONG_MAX") >] -> IntLit (l, big_int_of_string "9223372036854775807", true, false, NoLSuffix)
 | [< '(l, Kwd "ULLONG_MAX") >] -> IntLit (l, big_int_of_string "18446744073709551615", true, true, NoLSuffix)
-| [< '(l, Kwd "LONG_MIN") >] -> IntLit (l, min_signed_big_int long_rank, true, false, NoLSuffix)
-| [< '(l, Kwd "LONG_MAX") >] -> IntLit (l, max_signed_big_int long_rank, true, false, NoLSuffix)
-| [< '(l, Kwd "ULONG_MAX") >] -> IntLit (l, max_unsigned_big_int long_rank, true, true, NoLSuffix)
+| [< '(l, Kwd "LONG_MIN") >] -> (match dataModel with Some {long_rank} -> IntLit (l, min_signed_big_int long_rank, true, false, NoLSuffix) | _ -> construct_not_supported ())
+| [< '(l, Kwd "LONG_MAX") >] -> (match dataModel with Some {long_rank} -> IntLit (l, max_signed_big_int long_rank, true, false, NoLSuffix) | _ -> construct_not_supported ())
+| [< '(l, Kwd "ULONG_MAX") >] -> (match dataModel with Some {long_rank} -> IntLit (l, max_unsigned_big_int long_rank, true, true, NoLSuffix) | _ -> construct_not_supported ())
 and
   parse_expr_mul_rest e0 = parser
   [< '(l, Kwd "*"); e1 = parse_expr_suffix; e = parse_expr_mul_rest (Operation (l, Mul, [e0; e1])) >] -> e

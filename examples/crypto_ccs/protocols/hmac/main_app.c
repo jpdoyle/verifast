@@ -19,8 +19,6 @@ void *attacker_t(void* data) //@ : pthread_run_joinable
     //@ open hmac_proof_pred();
     //@ close pthread_run_pre(attacker_t)(data, info);
   }
-   
-  return 0;
 }
 
 struct hmac_args
@@ -137,6 +135,7 @@ int main(int argc, char **argv) //@ : main_full(main_app)
   //@ close havege_state(&havege_state);
   havege_init(&havege_state);
   //@ assume (bad(attacker));
+  //@ close exists(attacker);
   //@ close pthread_run_pre(attacker_t)(NULL, some(attacker));
   pthread_create(&a_thread, NULL, &attacker_t, NULL);
   
@@ -218,8 +217,9 @@ int main(int argc, char **argv) //@ : main_full(main_app)
     zeroize(key, KEY_SIZE);
     free((void*) key);
   }
-  
+#ifdef EXECUTE
   printf("\n\n\t\tDone\n");
   return 0;
+#endif
 }
 

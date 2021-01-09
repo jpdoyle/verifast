@@ -39,17 +39,13 @@ fixpoint bool is_pos_double(fp_double a){
     }
 }
     
-predicate pos_interval_pred(struct interval *interval, real x) =
-    interval->a |-> ?a &*&
-    interval->b |-> ?b &*&
-    is_pos_double(fp_of_double(a)) == true &*&
-    between(fp_of_double(a),fp_of_double(b),x) == true;
+predicate pos_interval_pred(struct interval interval, real x) =
+    is_pos_double(fp_of_double(interval.a)) == true &*&
+    between(fp_of_double(interval.a),fp_of_double(interval.b),x) == true;
 
 
-predicate interval_pred(struct interval *interval, real x) =
-    interval->a |-> ?a &*&
-    interval->b |-> ?b &*&
-    between(fp_of_double(a),fp_of_double(b),x) == true;
+predicate interval_pred(struct interval interval, real x) =
+    between(fp_of_double(interval.a),fp_of_double(interval.b),x) == true;
     
 lemma void between_lemma(fp_double a, real x, fp_double b)
     requires leq_double_real(a,x) == true &*& leq_real_double(x,b) == true;
@@ -58,7 +54,7 @@ lemma void between_lemma(fp_double a, real x, fp_double b)
 
 @*/
 
-double double_add_lower_bound(struct interval *first, struct interval *second)
+double double_add_lower_bound(struct interval first, struct interval second)
     /*@ requires interval_pred(first,?x1) &*&
     	interval_pred(second,?x2);@*/
     /*@ ensures interval_pred(first,x1) &*&
@@ -67,11 +63,11 @@ double double_add_lower_bound(struct interval *first, struct interval *second)
 {
     //@ open interval_pred(first, x1);
     //@ open interval_pred(second, x2);
-    //@ assert first->a |-> ?fa;
-    //@ assert second->a |-> ?sa;
-    //@ assert first->b |-> ?fb;
-    //@ assert second->b |-> ?sb;
-    double l = first->a + second->a;
+    //@ double fa = first.a;
+    //@ double sa = second.a;
+    //@ double fb = first.b;
+    //@ double sb = second.b;
+    double l = first.a + second.a;
     double ra = nextafter(l,-INFINITY);
     /*@
     if (is_real_double(fa) == true) {
@@ -118,7 +114,7 @@ double double_add_lower_bound(struct interval *first, struct interval *second)
     //@ close(interval_pred(second,x2));
 }
 
-double double_add_upper_bound(struct interval *first, struct interval *second)
+double double_add_upper_bound(struct interval first, struct interval second)
     /*@ requires interval_pred(first,?x1) &*&
     	interval_pred(second,?x2);@*/
     /*@ ensures interval_pred(first,x1) &*&
@@ -127,11 +123,11 @@ double double_add_upper_bound(struct interval *first, struct interval *second)
 {
     //@ open interval_pred(first, x1);
     //@ open interval_pred(second, x2);
-    //@ assert first->a |-> ?fa;
-    //@ assert second->a |-> ?sa;
-    //@ assert first->b |-> ?fb;
-    //@ assert second->b |-> ?sb;
-    double u = first->b + second->b;
+    //@ double fa = first.a;
+    //@ double sa = second.a;
+    //@ double fb = first.b;
+    //@ double sb = second.b;
+    double u = first.b + second.b;
     double rb = nextafter(u,INFINITY);
     /*@
     if (is_real_double(fb) == true) {
@@ -191,23 +187,22 @@ double double_add_upper_bound(struct interval *first, struct interval *second)
     //@ close(interval_pred(second,x2));
 }
 
-struct interval *double_add(struct interval *first, struct interval *second)
+struct interval double_add(struct interval first, struct interval second)
     /*@ requires interval_pred(first,?x1) &*&
     	interval_pred(second,?x2);@*/
     /*@ ensures interval_pred(first,x1) &*&
         interval_pred(second,x2) &*&
-        interval_pred(result,x1 + x2) &*&
-    	malloc_block_interval(result); @*/
+        interval_pred(result,x1 + x2); @*/
 {
-    struct interval *result = malloc(sizeof(struct interval));
-    if (result == 0) { abort(); }
-    result->a = double_add_lower_bound(first, second);
-    result->b = double_add_upper_bound(first, second);
+    struct interval result = {
+        double_add_lower_bound(first, second),
+        double_add_upper_bound(first, second)
+    };
     return result;
     //@ close(interval_pred(result,x1 + x2));
 }
 
-double double_sub_lower_bound(struct interval *first, struct interval *second)
+double double_sub_lower_bound(struct interval first, struct interval second)
     /*@ requires interval_pred(first,?x1) &*&
     	interval_pred(second,?x2); @*/
     /*@ ensures interval_pred(first,x1) &*&
@@ -216,11 +211,11 @@ double double_sub_lower_bound(struct interval *first, struct interval *second)
 {
     //@ open interval_pred(first, x1);
     //@ open interval_pred(second, x2);
-    //@ assert first->a |-> ?fa;
-    //@ assert second->a |-> ?sa;
-    //@ assert first->b |-> ?fb;
-    //@ assert second->b |-> ?sb;
-    double l = first->a - second->b;
+    //@ double fa = first.a;
+    //@ double sa = second.a;
+    //@ double fb = first.b;
+    //@ double sb = second.b;
+    double l = first.a - second.b;
     double ra = nextafter(l,-INFINITY);
     /*@
     if (is_real_double(fa) == true) {
@@ -265,7 +260,7 @@ double double_sub_lower_bound(struct interval *first, struct interval *second)
     return ra;
 }
 
-double double_sub_upper_bound(struct interval *first, struct interval *second)
+double double_sub_upper_bound(struct interval first, struct interval second)
     /*@ requires interval_pred(first,?x1) &*&
     	interval_pred(second,?x2); @*/
     /*@ ensures interval_pred(first,x1) &*&
@@ -274,11 +269,11 @@ double double_sub_upper_bound(struct interval *first, struct interval *second)
 {
     //@ open interval_pred(first, x1);
     //@ open interval_pred(second, x2);
-    //@ assert first->a |-> ?fa;
-    //@ assert second->a |-> ?sa;
-    //@ assert first->b |-> ?fb;
-    //@ assert second->b |-> ?sb;
-    double u = first->b - second->a;
+    //@ double fa = first.a;
+    //@ double sa = second.a;
+    //@ double fb = first.b;
+    //@ double sb = second.b;
+    double u = first.b - second.a;
     double rb = nextafter(u,INFINITY);
     /*@
     if (is_real_double(fb) == true) {
@@ -322,7 +317,6 @@ double double_sub_upper_bound(struct interval *first, struct interval *second)
         if (is_real_double(sa) == true) {
             real_double_lemma(sa);
     	} else {}
-    } else if (fp_of_double(fb) == neg_inf){
     } else {}
     @*/
     //@ assert leq_real_double(x1 - x2, fp_of_double(rb)) == true;
@@ -331,23 +325,22 @@ double double_sub_upper_bound(struct interval *first, struct interval *second)
     return rb;
 }
 
-struct interval *double_sub(struct interval *first, struct interval *second)
+struct interval double_sub(struct interval first, struct interval second)
     /*@ requires interval_pred(first,?x1) &*&
     	interval_pred(second,?x2); @*/
     /*@ ensures interval_pred(first,x1) &*&
     	interval_pred(second,x2) &*&
-    	interval_pred(result,x1 - x2) &*&
-    	malloc_block_interval(result); @*/
+    	interval_pred(result,x1 - x2); @*/
 {
-    struct interval *result = malloc(sizeof(struct interval));
-    if (result == 0) { abort(); }
-    result->a = double_sub_lower_bound(first, second);
-    result->b = double_sub_upper_bound(first, second);
+    struct interval result = {
+        double_sub_lower_bound(first, second),
+        double_sub_upper_bound(first, second)
+    };
     return result;
     //@ close(interval_pred(result,x1 - x2));
 }
 
-double double_mult_lower_bound(struct interval *first, struct interval *second)
+double double_mult_lower_bound(struct interval first, struct interval second)
     /*@ requires pos_interval_pred(first,?x1) &*&
     	pos_interval_pred(second,?x2);@*/
     /*@ ensures pos_interval_pred(first,x1) &*&
@@ -358,16 +351,17 @@ double double_mult_lower_bound(struct interval *first, struct interval *second)
     //@ open pos_interval_pred(first,x1);
     //@ open pos_interval_pred(second,x2);
     //@ real_of_int_lemma_UNSAFE(0,0);
-    //@ assert first->a |-> ?fa &*& fp_of_double(fa) == real_double(?rfa);
-    //@ assert first->b |-> ?fb;
-    //@ assert second->a |-> ?sa &*& fp_of_double(sa) == real_double(?rsa);
-    //@ assert second->b |-> ?sb;
+    //@ double fa = first.a;
+    //@ double sa = second.a;
+    //@ double fb = first.b;
+    //@ double sb = second.b;
+    //@ assert fp_of_double(fa) == real_double(?rfa);
+    //@ assert fp_of_double(sa) == real_double(?rsa);
     //@ mult_leq_substitution(0, 0, rfa, rsa);
     //@ mult_leq_substitution(rfa,rsa,x1,x2);
     
-    double l = first->a * second->a;
+    double l = first.a * second.a;
     double ra;
-    if (isnan(l)){l = 0;}
     if (l == 0) {
         ra = 0;
     } else {
@@ -423,13 +417,10 @@ double double_mult_lower_bound(struct interval *first, struct interval *second)
                                 prev_round_up_lemma(rfa * rsa, prev_double(round_up_double(rfa * rsa)));
                                 assert rra <= rfa * rsa;
                                 assert rfa * rsa > 0;
-                                if (rl == 0){
-                                    assert rra == 0;
-                                } else {
-                                    assert rl > 0;
-                                    prev_double_zero_lemma(rl);
-                                    assert rra >= 0;
-                                }
+                                assert rl != 0;
+                                assert rl > 0;
+                                prev_double_zero_lemma(rl);
+                                assert rra >= 0;
                             }
                         }
                         
@@ -443,7 +434,7 @@ double double_mult_lower_bound(struct interval *first, struct interval *second)
     return ra;
 }
 
-double double_mult_upper_bound(struct interval *first, struct interval *second)
+double double_mult_upper_bound(struct interval first, struct interval second)
     /*@ requires pos_interval_pred(first,?x1) &*&
     	pos_interval_pred(second,?x2);@*/
     /*@ ensures pos_interval_pred(first,x1) &*&
@@ -453,14 +444,16 @@ double double_mult_upper_bound(struct interval *first, struct interval *second)
     //@ open pos_interval_pred(first,x1);
     //@ open pos_interval_pred(second,x2);
     //@ real_of_int_lemma_UNSAFE(0,0);
-    //@ assert first->a |-> ?fa &*& fp_of_double(fa) == real_double(?rfa) &*& 0 <= rfa;
-    //@ assert first->b |-> ?fb;
-    //@ assert second->a |-> ?sa &*& fp_of_double(sa) == real_double(?rsa) &*& 0 <= rsa;
-    //@ assert second->b |-> ?sb;
+    //@ double fa = first.a;
+    //@ double sa = second.a;
+    //@ double fb = first.b;
+    //@ double sb = second.b;
+    //@ assert fp_of_double(fa) == real_double(?rfa) &*& 0 <= rfa;
+    //@ assert fp_of_double(sa) == real_double(?rsa) &*& 0 <= rsa;
     //@ mult_leq_substitution(0, 0, rfa, rsa);
     //@ mult_leq_substitution(rfa, rsa, x1, x2);
 
-    double u = first->b * second->b;
+    double u = first.b * second.b;
     double rb;
     if (isnan(u)){
         rb = 0;
@@ -543,23 +536,22 @@ double double_mult_upper_bound(struct interval *first, struct interval *second)
     return rb;
 }
 
-struct interval *double_mult(struct interval *first, struct interval *second)
+struct interval double_mult(struct interval first, struct interval second)
     /*@ requires pos_interval_pred(first,?x1) &*&
     	pos_interval_pred(second,?x2);@*/
     /*@ ensures pos_interval_pred(first,x1) &*&
     	pos_interval_pred(second,x2) &*&
-    	pos_interval_pred(result, x1 * x2) &*&
-    	malloc_block_interval(result); @*/
+    	pos_interval_pred(result, x1 * x2); @*/
 {
-    struct interval *result = malloc(sizeof(struct interval));
-    if (result == 0) { abort(); }
-    result->a = double_mult_lower_bound(first, second);
-    result->b = double_mult_upper_bound(first, second);
+    struct interval result = {
+        double_mult_lower_bound(first, second),
+        double_mult_upper_bound(first, second)
+    };
     return result;
     //@ close(pos_interval_pred(result,x1 * x2));
 }
 
-double double_div_lower_bound(struct interval *first, struct interval *second)
+double double_div_lower_bound(struct interval first, struct interval second)
     /*@ requires pos_interval_pred(first,?x1) &*&
         pos_interval_pred(second,?x2) &*&
         x2 != 0;
@@ -572,12 +564,12 @@ double double_div_lower_bound(struct interval *first, struct interval *second)
 {
     //@ open pos_interval_pred(first,x1);
     //@ open pos_interval_pred(second,x2);
-    //@ assert first->a |-> ?fa;
-    //@ assert first->b |-> ?fb;
-    //@ assert second->a |-> ?sa;
-    //@ assert second->b |-> ?sb;
+    //@ double fa = first.a;
+    //@ double sa = second.a;
+    //@ double fb = first.b;
+    //@ double sb = second.b;
     //@ real_of_int_lemma_UNSAFE(0,0);
-    double l = first->a / second->b;
+    double l = first.a / second.b;
     double ra;
     if (l == 0){
         ra = 0;
@@ -611,7 +603,6 @@ double double_div_lower_bound(struct interval *first, struct interval *second)
                assert rsb > 0;
                assert x2 != 0;
                if (x2 < 0){
-                   assert fp_of_double(sa) == real_double(?rsa);
                    assert false;
                } //neccesary to prove next line
                assert x2 > 0;
@@ -673,7 +664,7 @@ double double_div_lower_bound(struct interval *first, struct interval *second)
     return ra;
 }
 
-double double_div_upper_bound(struct interval *first, struct interval *second)
+double double_div_upper_bound(struct interval first, struct interval second)
     /*@ requires pos_interval_pred(first,?x1) &*&
         pos_interval_pred(second,?x2) &*&
         x2 != 0;
@@ -685,12 +676,14 @@ double double_div_upper_bound(struct interval *first, struct interval *second)
 {
     //@ open pos_interval_pred(first,x1);
     //@ open pos_interval_pred(second,x2);
-    //@ assert first->a |-> ?fa &*& fp_of_double(fa) == real_double(?rfa);
-    //@ assert first->b |-> ?fb;
-    //@ assert second->a |-> ?sa &*& fp_of_double(sa) == real_double(?rsa);
-    //@ assert second->b |-> ?sb;
+    //@ double fa = first.a;
+    //@ double sa = second.a;
+    //@ double fb = first.b;
+    //@ double sb = second.b;
+    //@ assert fp_of_double(fa) == real_double(?rfa);
+    //@ assert fp_of_double(sa) == real_double(?rsa);
     //@ real_of_int_lemma_UNSAFE(0,0);
-    double u = first->b / second->a;
+    double u = first.b / second.a;
     double rb;
     if (isnan(u)){
         rb = 0;
@@ -702,14 +695,15 @@ double double_div_upper_bound(struct interval *first, struct interval *second)
         //@ assert x2 > 0;
         //@ real_div_lemma(x1,x2,real_div(x1,x2));
         //@ assert 0 == x2 * real_div(x1, x2);
-        /*@
+        //@ assert 0 == real_div(x1, x2);
+        /*
         if (real_div(x1, x2) > 0) {
             cancellation_lemma2(x2, 0, real_div(x1, x2));
         } else if (real_div(x1, x2) < 0) {
             cancellation_lemma2(x2, real_div(x1, x2), 0);
         } else {
         }
-        @*/
+        */
         //@ assert real_div(x1,x2) == 0;
         //@ assert leq_real_double(real_div(x1, x2), fp_of_double(rb)) == true;
     } else {
@@ -724,8 +718,8 @@ double double_div_upper_bound(struct interval *first, struct interval *second)
             } else if (fp_of_double(u) == neg_inf){
                 assert rsa > 0;
                 real_div_lemma(rfb,rsa,real_div(rfb,rsa));
-                assert rfb == rsa * real_div(rfb, rsa);
-                cancellation_lemma2(rsa, real_div(rfb, rsa), 0);
+                //assert rfb == rsa * real_div(rfb, rsa);
+                //cancellation_lemma2(rsa, real_div(rfb, rsa), 0);
                 assert false;
             } else {
                 assert fp_of_double(u) == real_double(?ru);
@@ -735,7 +729,7 @@ double double_div_upper_bound(struct interval *first, struct interval *second)
                     assert fp_of_double(rb) == real_double(?rrb);
                     real_div_lemma(rfb,rsa,real_div(rfb,rsa));
                     if (real_div(rfb, rsa) < min_dbl) {
-                        cancellation_lemma2(rsa, real_div(rfb, rsa), 0);
+                        //cancellation_lemma2(rsa, real_div(rfb, rsa), 0);
                         assert false;
                     }
                     assert ru >= round_down_double(real_div(rfb,rsa));
@@ -762,21 +756,20 @@ double double_div_upper_bound(struct interval *first, struct interval *second)
     return rb;
 }
 
-struct interval *double_div(struct interval *first, struct interval *second)
+struct interval double_div(struct interval first, struct interval second)
     /*@ requires pos_interval_pred(first,?x1) &*&
         pos_interval_pred(second,?x2) &*&
         x2 != 0;
     @*/
     /*@ ensures pos_interval_pred(first,x1) &*&
     	pos_interval_pred(second,x2) &*&
-    	pos_interval_pred(result, real_div(x1, x2)) &*&
-    	malloc_block_interval(result);
+    	pos_interval_pred(result, real_div(x1, x2));
     @*/
 {
-    struct interval *result = malloc(sizeof(struct interval));
-    if (result == 0) { abort(); }
-    result->a = double_div_lower_bound(first, second);
-    result->b = double_div_upper_bound(first, second);
+    struct interval result = {
+        double_div_lower_bound(first, second),
+        double_div_upper_bound(first, second)
+    };
     return result;
     //@ close(pos_interval_pred(result,real_div(x1, x2)));
 }

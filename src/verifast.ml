@@ -212,12 +212,8 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             let (ss_before, call_opt) =
               let rec iter ss_before ss_after =
                 match ss_after with
-                  [] ->
-                  if fpe_opt = None then
-                    (List.rev ss_before, None)
-                  else
-                    static_error l "'call();' statement expected" None
-                | ExprStmt (CallExpr (lc, "call", [], [], [], Static))::ss_after -> (List.rev ss_before, Some (lc, None, ss_after))
+                  [] -> (List.rev ss_before, None)
+                | ExprStmt (CallExpr (lc, "call", [], [], [], Static))::ss_after ->(List.rev ss_before, Some (lc, None, ss_after))
                 | DeclStmt (ld, [lx, tx, x, Some(CallExpr (lc, "call", [], [], [], Static)), _])::ss_after ->
                   if List.mem_assoc x tenv then static_error ld "Variable hides existing variable" None;
                   let t = check_pure_type (pn,ilist) tparams gh tx in
@@ -226,7 +222,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                     None -> static_error ld "Function does not return a value" None
                   | Some rt1 ->
                     expect_type ld (Some true) rt1 t;
-                    (List.rev ss_before, Some (lc, Some (x, t), ss_after))
+                    (List.rev ss_before, Some (ld, Some (x, t), ss_after))
                   end
                 | s::ss_after -> iter (s::ss_before) ss_after
               in
@@ -270,6 +266,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               begin fun ftcheck_cont ->
               match call_opt with
                 None ->
+                if fpe_opt <> None then static_error l "'call();' statement expected" None;
                 if rt <> None then static_error l "To produce a lemma function pointer chunk for a lemma function type with a non-void return type, you must specify a lemma." None;
                 ftcheck_cont h ft_env
               | Some (callLoc, resultvar, ss_after) ->
@@ -291,6 +288,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                       end
                     bs
                 in
+                reportStmtExec callLoc;
                 with_context (Executing (h, env, callLoc, "Verifying function call")) $. fun () ->
                 with_context PushSubcontext $. fun () ->
                 let pre1_env = currentThreadEnv @ List.map (fun (x, x0, tp, t, t0, x1, tp1) -> (x1, t)) fparams @ funenv1 in
@@ -433,7 +431,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         match name with
           "close_struct" -> Unspecified
         | "close_struct_zero" ->
-          let cond = mk_all_eq (Int (Signed, 0)) elems (ctxt#mk_intlit 0) in
+          let cond = mk_all_eq charType elems (ctxt#mk_intlit 0) in
           if not (ctxt#query cond) then assert_false h env l ("Could not prove condition " ^ ctxt#pprint cond) None;
           Default
       in
@@ -447,7 +445,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       eval_h h env w $. fun h env pointerTerm ->
       consume_c_object l pointerTerm (StructType sn) h true $. fun h ->
       let (_, _, _, _, chars_symb, _, _) = List.assoc "chars" predfammap in
-      let cs = get_unique_var_symb "cs" (InductiveType ("list", [Int (Signed, 0)])) in
+      let cs = get_unique_var_symb "cs" (InductiveType ("list", [charType])) in
       let Some (_, _, _, _, length_symb) = try_assoc' Ghost (pn,ilist) "length" purefuncmap in
       let size = struct_size l sn in
       assume (ctxt#mk_eq (mk_app length_symb [cs]) size) $. fun () ->
@@ -627,23 +625,44 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           match t with
             StaticArrayType (elemTp, elemCount) ->
             produce_object t
-          | StructType sn ->
+          | StructType sn when !address_taken || (let (_, fds, _, _) = List.assoc sn structmap in match fds with Some fds -> List.exists (fun (_, (_, gh, _, _)) -> gh = Ast.Ghost) fds | _ -> true) ->
+            (* If the variable's address is taken or the struct type has no body or it has a ghost field, treat it like a resource. *)
             produce_object (RefType t)
           | _ ->
-            begin fun cont ->
-              match e with
-                None -> cont h env (get_unique_var_symb_non_ghost x t)
-              | Some e ->
+            let rec get_initial_value h env x t e cont =
+              match t, e with
+                _, None -> cont h env (get_unique_var_symb_non_ghost x t)
+              | StructType sn, Some (InitializerList (linit, es)) ->
+                let (_, Some fds, _, _) = List.assoc sn structmap in
+                let bs =
+                  match zip fds es with
+                    Some bs -> bs
+                  | None -> static_error linit "Length of initializer list does not match number of struct fields." None
+                in
+                let rec iter h env vs bs =
+                  match bs with
+                    [] ->
+                    let (_, csym, _, _) = List.assoc sn struct_accessor_map in
+                    cont h env (ctxt#mk_app csym (List.rev vs))
+                  | ((f, (_, _, tp, _)), e)::bs ->
+                    get_initial_value h env f tp (Some e) $. fun h env v ->
+                    iter h env (v::vs) bs
+                in
+                iter h env [] bs
+              | _, Some e ->
                 let w = check_expr_t (pn,ilist) tparams tenv e t in
                 verify_expr false h env (Some x) w (fun h env v -> cont h env v) econt
-            end $. fun h env v ->
-            if !address_taken then
+            in
+            get_initial_value h env x t e $. fun h env v ->
+            if !address_taken then begin
+              if is_inductive_type(t) then static_error l "Taking the address of an inductive variable is not allowed." None;
               let addr = get_unique_var_symb_non_ghost (x ^ "_addr") (PtrType t) in
               let h = ((Chunk ((pointee_pred_symb l t, true), [], real_unit, [addr; v], None)) :: h) in
               if pure then static_error l "Taking the address of a ghost variable is not allowed." None;
               iter h ((x, RefType(t)) :: tenv) ghostenv ((x, addr)::env) xs
-            else
+            end else begin
               iter h ((x, t) :: tenv) ghostenv ((x, v)::env) xs
+            end
       in
       iter h tenv ghostenv env xs
     | ExprStmt e ->
@@ -677,7 +696,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       let tcont _ _ _ h env = tcont sizemap tenv ghostenv h (List.filter (fun (x, _) -> List.mem_assoc x tenv) env) in
       begin match unfold_inferred_type tp with
         InductiveType (i, targs) ->
-        let (tn, targs, Some (_, itparams, ctormap, _, _)) = (i, targs, try_assoc' Ghost (pn,ilist) i inductivemap) in
+        let (tn, targs, Some (_, itparams, ctormap, _, _, _, _, _)) = (i, targs, try_assoc' Ghost (pn,ilist) i inductivemap) in
         let (Some tpenv) = zip itparams targs in
         let rec iter ctors cs =
           match cs with
@@ -791,14 +810,14 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     | Assert (l, p) when not pure ->
       let we = check_expr_t (pn,ilist) tparams tenv p boolt in
       let t = eval env we in
-      assert_term t h env l ("Assertion might not hold: " ^ (ctxt#pprint t)) None;
+      assert_term t h env l "Assertion might not hold." None;
       cont h env
     | Assert (l, p) ->
       let (wp, tenv, _) = check_asn_core (pn,ilist) tparams tenv p in
       begin match wp with
         ExprAsn (le, we) ->
         let t = eval env we in
-        assert_term t h env le ("Assertion might not hold: " ^ (ctxt#pprint t)) None;
+        assert_term t h env le "Assertion might not hold." None;
         cont h env
       | _ ->
         consume_asn rules [] h ghostenv env wp false real_unit (fun _ _ ghostenv env _ ->
@@ -835,6 +854,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             begin match try_assoc g cpreds with
               None -> static_error l "No such predicate instance" None
             | Some (lp, pmap, family, symb, body_opt) ->
+              reportUseSite DeclKind_Predicate lp l;
               match body_opt with
                 None -> static_error l "Predicate does not have a body" None
               | Some body -> (pmap, symb, body)
@@ -869,7 +889,8 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               | _ -> funcnameterm_of funcmap fn
             in
             match try_assoc (g, fns) predinstmap with
-              Some (predenv, _, predinst_tparams, ps, g_symb, inputParamCount, p) ->
+              Some (predenv, lp, predinst_tparams, ps, g_symb, inputParamCount, p) ->
+              reportUseSite DeclKind_Predicate lp l;
               let (targs, tpenv) =
                 let targs = if targs = [] then List.map (fun _ -> InferredType (object end, ref Unconstrained)) predinst_tparams else targs in
                 match zip predinst_tparams targs with
@@ -903,7 +924,8 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               let this = List.assoc "this" env in
               open_instance_predicate this target_cn
             end
-          | Some (PredCtorInfo (_, ps1, ps2, inputParamCount, body, funcsym)) ->
+          | Some (PredCtorInfo (lp, ps1, ps2, inputParamCount, body, funcsym)) ->
+            reportUseSite DeclKind_Predicate lp l;
             if targs <> [] then static_error l "Predicate constructor expects 0 type arguments." None;
             let bs0 =
               match zip pats0 ps1 with
@@ -1163,6 +1185,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             begin match try_assoc g cpreds with
               None -> static_error l "No such predicate instance" None
             | Some (lp, pmap, family, symb, body_opt) ->
+              reportUseSite DeclKind_Predicate lp l;
               match body_opt with
                 None -> static_error l "Predicate does not have a body" None
               | Some body -> (lp, pmap, symb, body)
@@ -1192,6 +1215,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           begin
           match try_assoc (g, fns) predinstmap with
             Some (predenv, lpred, predinst_tparams, ps, g_symb, inputParamCount, body) ->
+            reportUseSite DeclKind_Predicate lpred l;
             let targs = if targs = [] then List.map (fun _ -> InferredType (object end, ref Unconstrained)) predinst_tparams else targs in
             let tpenv =
               match zip predinst_tparams targs with
@@ -1227,6 +1251,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               | _ -> static_error l "No such predicate instance." None
               end
             | Some (PredCtorInfo (lpred, ps1, ps2, inputParamCount, body, funcsym)) ->
+              reportUseSite DeclKind_Predicate lpred l;
               let bs0 =
                 match zip pats0 ps1 with
                   None -> static_error l "Incorrect number of predicate constructor arguments." None
@@ -1483,9 +1508,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       | (Some t_dec, Some dec) ->
         eval_h_pure h' env''' dec $. fun _ _ t_dec2 ->
         let dec_check1 = ctxt#mk_lt t_dec2 t_dec in
-        assert_term dec_check1 h' env''' (expr_loc dec) (sprintf "Cannot prove that loop measure decreases: %s" (ctxt#pprint dec_check1)) None;
+        assert_term dec_check1 h' env''' (expr_loc dec) "Cannot prove that loop measure decreases." None;
         let dec_check2 = ctxt#mk_le (ctxt#mk_intlit 0) t_dec in
-        assert_term dec_check2 h' env''' (expr_loc dec) (sprintf "Cannot prove that the loop measure remains non-negative: %s" (ctxt#pprint dec_check2)) None;
+        assert_term dec_check2 h' env''' (expr_loc dec) "Cannot prove that the loop measure remains non-negative." None;
         cont h'''
       end $. fun h''' ->
       check_leaks h''' env endBodyLoc "Loop leaks heap chunks."
@@ -1531,11 +1556,11 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         consume_asn rules [] h' ghostenv' env' post true real_unit $. fun _ h' _ _ _ ->
         check_leaks h' env' endBodyLoc "Loop leaks heap chunks"
       in
-      let (ss_before, ss_after) =
+      let (ss_before, recursiveCallLoc, ss_after) =
         let rec iter ss_before ss =
           match ss with
-            [] -> (List.rev ss_before, [])
-          | PureStmt (_, ExprStmt (CallExpr (lc, "recursive_call", [], [], [], Static)))::ss_after -> (List.rev ss_before, ss_after)
+            [] -> (List.rev ss_before, None, [])
+          | PureStmt (_, ExprStmt (CallExpr (lc, "recursive_call", [], [], [], Static)))::ss_after -> (List.rev ss_before, Some lc, ss_after)
           | s::ss_after -> iter (s::ss_before) ss_after
         in
         iter [] ss
@@ -1580,6 +1605,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           return_cont
           econt
       end $. fun h' tenv''' env' ->
+      begin match recursiveCallLoc with Some l -> reportStmtExec l | None -> () end;
       let env'' = List.filter (fun (x, _) -> List.mem_assoc x tenv) env' in
       consume_asn rules [] h' ghostenv env'' pre true real_unit $. fun _ h' ghostenv'' env'' _ ->
       execute_branch begin fun () -> match (t_dec, dec) with
@@ -1587,9 +1613,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       | (Some t_dec, Some dec) ->
         eval_h_pure h' env'' dec $. fun _ _ t_dec2 ->
         let dec_check1 = ctxt#mk_lt t_dec2 t_dec in
-        assert_term dec_check1 h' env'' (expr_loc dec) (sprintf "Cannot prove that loop measure decreases: %s" (ctxt#pprint dec_check1)) None;
+        assert_term dec_check1 h' env'' (expr_loc dec) "Cannot prove that loop measure decreases." None;
         let dec_check2 = ctxt#mk_le (ctxt#mk_intlit 0) t_dec in
-        assert_term dec_check2 h' env'' (expr_loc dec) (sprintf "Cannot prove that the loop measure remains non-negative: %s" (ctxt#pprint dec_check2)) None;
+        assert_term dec_check2 h' env'' (expr_loc dec) "Cannot prove that the loop measure remains non-negative." None;
         success()
       end;
       let bs' = List.map (fun x -> (x, get_unique_var_symb_ x (List.assoc x tenv) (List.mem x ghostenv))) xs in
@@ -2111,6 +2137,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         (true, _) when pure -> assert_false h env (l()) "Loops are not allowed in a pure context." None
       | (true, None) -> assert_false h env (l()) "Loop invariant required." None
       | (_, Some (l, inv, tenv)) ->
+        reportStmtExec l;
         consume_asn rules [] h ghostenv env inv true real_unit (fun _ h _ _ _ ->
           check_backedge_termination (List.assoc current_thread_name env) leminfo l tenv h $. fun h ->
           check_leaks h env l "Loop leaks heap chunks."
@@ -2479,7 +2506,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     let penv = get_unique_var_symbs_ ps (match k with Regular -> false | _ -> true) in (* actual params invullen *)
     let heapy_vars = list_remove_dups (List.flatten (List.map (fun s -> stmt_address_taken s) ss)) in
     let heapy_ps = List.flatten (List.map (fun (x,tp) -> 
-      if List.mem x heapy_vars then 
+      if List.mem x heapy_vars then
         let addr = get_unique_var_symb_non_ghost (x ^ "_addr") (PtrType tp) in
         [(l, x, tp, addr)] 
       else 
@@ -2629,7 +2656,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         else
           static_error lm "Constructor specification is only allowed in javaspec files!" None
       | Some (Some ((ss, closeBraceLoc), rank)) ->
-        reportStmts ss;
+        if report_skipped_stmts || match pre with ExprAsn (_, False _) -> false | _ -> true then reportStmts ss;
         record_fun_timing lm (cn ^ ".<ctor>") begin fun () ->
         if !verbosity >= 1 then Printf.printf "%10.6fs: %s: Verifying constructor %s\n" (Perf.time()) (string_of_loc lm) (string_of_sign (cn, sign));
         execute_branch begin fun () ->
@@ -2664,6 +2691,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                 let (argtypes, args) = match explicitsupercall with
                   None -> ([], [])
                 | Some(SuperConstructorCall(l, es)) -> 
+                  reportStmtExec l;
                   inheritance_check cn l;
                   ((List.map (fun e -> let (w, tp) = check_expr (pn,ilist) [] tenv (Some true) e in tp) es), es)
                 in
@@ -2727,7 +2755,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           if (Filename.check_suffix p ".javaspec") || abstract then verify_meths (pn,ilist) cfin cabstract boxes lems meths ctparams
           else static_error l "Method specification is only allowed in javaspec files!" None
       | Some (Some ((ss, closeBraceLoc), rank)) ->
-        reportStmts ss;
+        if report_skipped_stmts || match pre with ExprAsn (_, False _) -> false | _ -> true then reportStmts ss;
         record_fun_timing l g begin fun () ->
         if !verbosity >= 1 then Printf.printf "%10.6fs: %s: Verifying method %s\n" (Perf.time()) (string_of_loc l) g;
         if abstract then static_error l "Abstract method cannot have implementation." None;
@@ -2958,7 +2986,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       ), 
       (
         structmap1, unionmap1, enummap1, globalmap1, modulemap1, importmodulemap1, 
-        inductivemap1, purefuncmap1,predctormap1, malloc_block_pred_map1, 
+        inductivemap1, purefuncmap1,predctormap1, struct_accessor_map1, malloc_block_pred_map1, 
         field_pred_map1, predfammap1, predinstmap1, typedefmap1, functypemap1, 
         funcmap1, boxmap,classmap1,interfmap1,classterms1,interfaceterms1, 
         abstract_types_map1
@@ -3244,8 +3272,21 @@ let prover_descriptions indent =
     |> List.map (fun (name, (description, f)) -> indent ^ name ^ ": " ^ description ^ "\n")
     |> String.concat ""
 
+let (version, version_long) =
+  let version_file_name = Filename.concat (Filename.dirname Sys.executable_name) "VERSION" in
+  if Sys.file_exists version_file_name then
+    let ch = open_in version_file_name in
+    let version = input_line ch in
+    let version_long = input_line ch in
+    close_in ch;
+    (Some version, Some version_long)
+  else
+    (None, None)
+
+let string_of_string_opt = function None -> "" | Some s -> " " ^ s
+
 let banner () =
-  "VeriFast " ^ Vfversion.version ^ " for C and Java (released " ^ Vfversion.release_date ^ ") <https://github.com/verifast/verifast/>\n" ^
+  "VeriFast" ^ string_of_string_opt version_long ^ " for C and Java <https://github.com/verifast/verifast/>\n" ^
   "By Bart Jacobs, Jan Smans, and Frank Piessens, with contributions by Pieter Agten, Cedric Cuypers, Lieven Desmet, Jan Tobias Muehlberg, Willem Penninckx, Pieter Philippaerts, Amin Timany, Thomas Van Eyck, Gijs Vanspauwen, Frederic Vogels, and external contributors <https://github.com/verifast/verifast/graphs/contributors>" ^
   "\n\nProvers:\n" ^ prover_descriptions "  "
 
