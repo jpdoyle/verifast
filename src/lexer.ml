@@ -114,29 +114,60 @@ let get_first_line_tokens text =
       | c -> Printf.sprintf "%c" c::first_line_tokens (i + 1)
   and ident_token start i =
     match if i = n then None else Some text.[i] with
-      Some ('A'..'Z'|'a'..'z'|'0'..'9'|'_') -> ident_token start (i + 1)
+      Some ('A'..'Z'|'a'..'z'|'0'..'9'|'_'|'.') -> ident_token start (i + 1)
     | _ -> String.sub text start (i - start)::first_line_tokens i
   in
   first_line_tokens 0
 
-type file_options = {file_opt_annot_char: char; file_opt_tab_size: int}
+type file_options = {
+  annot_char: char;
+  tab_size: int;
+  disable_overflow_check: bool option;
+  prover: string option;
+  target: string option
+}
+
+exception FileOptionsError of string
+
+let default_file_options =
+  {annot_char='@'; tab_size=8; disable_overflow_check=None; prover=None; target=None}
 
 let get_file_options text =
   let tokens = get_first_line_tokens text in
-  let rec iter annotChar tabSize toks =
+  let rec iter inVFBlock opts toks =
     match toks with
-      "verifast_annotation_char"::":"::c::toks when String.length c = 1 -> iter c.[0] tabSize toks
+      "verifast_annotation_char"::":"::c::toks when String.length c = 1 -> iter inVFBlock {opts with annot_char=c.[0]} toks
     | "tab_size"::":"::n::toks ->
       let tabSize =
         match int_of_string n with
-          exception Failure _ -> tabSize
+          exception Failure _ -> opts.tab_size
         | n -> n
       in
-      iter annotChar tabSize toks
-    | tok::toks -> iter annotChar tabSize toks
-    | [] -> {file_opt_annot_char=annotChar; file_opt_tab_size=tabSize}
+      iter inVFBlock {opts with tab_size=tabSize} toks
+    | "verifast_options"::"{"::toks ->
+      iter true opts toks
+    | "disable_overflow_check"::toks when inVFBlock ->
+      iter inVFBlock {opts with disable_overflow_check=Some true} toks
+    | "prover"::":"::prover::toks when inVFBlock ->
+      iter inVFBlock {opts with prover=Some prover} toks
+    | "target"::":"::target::toks when inVFBlock ->
+      iter inVFBlock {opts with target=Some target} toks
+    | "}"::toks when inVFBlock ->
+      iter false opts toks
+    | tok::toks ->
+      if inVFBlock then
+        raise (FileOptionsError ("No such VeriFast option: '" ^ tok ^ "'; example: verifast_annotation_char:@ tab_size:4 verifast_options{disable_overflow_check prover:z3v4.5 target:32bit}"))
+      else
+        iter inVFBlock opts toks
+    | [] -> opts
   in
-  iter '@' 8 tokens
+  iter false default_file_options tokens
+
+let readFileOptions path =
+  let chan = open_in path in
+  let line = try input_line chan with End_of_file -> "" in
+  close_in chan;
+  get_file_options line
 
 let readFile path =
   let chan, close_chan =
@@ -310,6 +341,7 @@ let big_int_of_octal_string s =
 (** For syntax highlighting. *)
 
 type decl_kind =
+  | DeclKind_HeaderFile
   | DeclKind_InductiveType
   | DeclKind_Struct
   | DeclKind_Union
@@ -836,7 +868,7 @@ let make_lexer_helper keywords ghostKeywords path text reportRange inComment inG
   make_lexer_core keywords ghostKeywords startpos text reportRange inComment inGhostRange exceptionOnError reportShouldFail annotChar
 
 let make_lexer keywords ghostKeywords path text reportRange ?inGhostRange reportShouldFail =
-  let {file_opt_annot_char=annotChar} = get_file_options text in
+  let {annot_char=annotChar} = try get_file_options text with FileOptionsError msg -> raise (ParseException (Lexed ((path, 1, 1), (path, 1, 1)), msg)) in
   let (loc, ignore_eol, token_stream, _, _) = make_lexer_helper keywords ghostKeywords path text reportRange false (match inGhostRange with None -> false | Some b -> b) true reportShouldFail annotChar in
   (loc, ignore_eol, token_stream)
 
@@ -1182,11 +1214,11 @@ let make_file_preprocessor0 path get_macro set_macro peek junk in_ghost_range da
       skip_block ();
       begin match peek () with
         Some (_, Kwd "endif") -> junk (); ()
-      | Some (_, Kwd "elif") -> junk (); conditional ()
+      | Some (l, Kwd "elif") -> junk (); conditional l
       | Some (_, Kwd "else") -> junk (); ()
       | Some (_, Eof) -> ()
       end
-    and conditional () =
+    and conditional l =
       let rec condition () =
         match peek () with
           Some (_, Eof) | Some (_, Eol) -> []
@@ -1225,7 +1257,19 @@ let make_file_preprocessor0 path get_macro set_macro peek junk in_ghost_range da
       in
       let condition = condition () in
       let condition = macro_expand [] condition in
-      let condition = parse_operators dataModel (Stream.of_list condition) in
+      let condition =
+        let stream = Stream.of_list condition in
+        let error msg =
+          match Stream.peek stream with
+            Some (l, _) -> error l msg
+          | None -> error l msg
+        in
+        try
+          parse_operators dataModel stream
+        with
+          Stream.Error msg -> error msg
+        | Stream.Failure -> error "Parse error during preprocessing"
+      in
       let _, condition = eval_operators condition in
       let isTrue = sign_big_int condition <> 0 in
       if isTrue then () else skip_branch ()
@@ -1369,7 +1413,7 @@ let make_file_preprocessor0 path get_macro set_macro peek junk in_ghost_range da
           end
         | Some (l, Kwd "if") ->
           junk ();
-          conditional ();
+          conditional l;
           next_token ()
         | Some (l, Kwd ("elif"|"else")) ->
           junk ();

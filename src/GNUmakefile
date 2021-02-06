@@ -438,7 +438,7 @@ endif
 	  $(Z3ARGS) branchleft_png.cmx branchright_png.cmx vfconfig.cmx vfide.cmx
 ifeq ($(OS), Darwin)
 	DYLD_LIBRARY_PATH=../lib DYLD_PRINT_LIBRARIES=1 ../bin/vfide -verify_and_quit ../examples/busywaiting/ioliveness/echo_live_mt.c > vfide-libraries.log 2>&1
-	[[ -z "$$(grep /usr/local vfide-libraries.log)" ]]
+	! grep /usr/local vfide-libraries.log
 endif
 endif
 ifneq ($(OS), Windows_NT)
@@ -494,10 +494,15 @@ vfide.cmx: SExpressionEmitter.cmx
 
 #------------------------------- Tests --------------------------------------#
 testsuite: $(STDLIB) $(TOOLS_EXCEPT_VFIDE)
+	@echo "  OCAMLOPT " json_tests
+	$(OCAMLOPT) $(OCAMLCFLAGS) -o json_tests$(DOTEXE) json.cmx json_tests.ml && ./json_tests$(DOTEXE)
 	@echo "  MYSH     " testsuite
 	$(SET_ENV); \
         cd ..; bin/mysh -cpus $(NUMCPU) < testsuite.mysh
 .PHONY: testsuite
+
+clean::
+	if [ -f ./json_tests$(DOTEXE) ]; then rm json_tests$(DOTEXE); fi
 
 # Verify model solution of student assignments to prevent regression.
 assignment_tests: $(STDLIB) $(TOOLS_EXCEPT_VFIDE)
